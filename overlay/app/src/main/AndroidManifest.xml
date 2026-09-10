@@ -29,6 +29,7 @@
         android:smallScreens="true" />
 
     <application
+        android:name="com.blackrussia.game.vostok.VostokApplication"
         android:hardwareAccelerated="false"
         android:icon="@drawable/vostok_app_icon"
         android:isGame="true"
