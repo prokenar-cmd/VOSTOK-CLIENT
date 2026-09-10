@@ -6,6 +6,8 @@ import android.os.Looper;
 import com.blackrussia.game.gui.HudManager;
 import com.blackrussia.game.gui.Notification;
 
+import java.util.List;
+
 /**
  * Single Java-side UI bridge for VOSTOK gameplay overlays.
  *
@@ -18,17 +20,46 @@ public final class VostokUiBridge {
     private final HudManager hudManager;
     private final Notification notificationManager;
     private final InteractionUiManager interactionManager;
+    private final InteractionCore interactionCore;
+    private final Runnable legacyNpcInteractionAction;
     private volatile boolean destroyed;
 
     public VostokUiBridge(Activity activity, Runnable interactionAction) {
         this.activity = activity;
+        this.legacyNpcInteractionAction = interactionAction;
         hudManager = new HudManager(activity);
         notificationManager = new Notification(activity);
-        interactionManager = new InteractionUiManager(activity, () -> {
-            if (interactionAction != null) {
-                interactionAction.run();
-            }
-        });
+        interactionManager = new InteractionUiManager(activity, this::onInteractionPressed);
+
+        interactionCore = new InteractionCore(
+                new InteractionCore.UiPort() {
+                    @Override
+                    public void show(String label, float distanceMeters) {
+                        interactionManager.show(label, distanceMeters);
+                    }
+
+                    @Override
+                    public void hide() {
+                        interactionManager.hide();
+                    }
+
+                    @Override
+                    public void setHudContext(int flags, int reservedActionSlots) {
+                        interactionManager.setContext(flags, reservedActionSlots);
+                    }
+                },
+                (target, action) -> {
+                    // Runtime policy currently enables NPC only. Keep the legacy command strictly
+                    // scoped to NPC interaction so future resource/vehicle/player actions cannot
+                    // accidentally reuse the wrong transport.
+                    if (target.type == InteractionContract.TARGET_NPC
+                            && action.id == InteractionContract.ACTION_INTERACT
+                            && legacyNpcInteractionAction != null) {
+                        legacyNpcInteractionAction.run();
+                    }
+                },
+                null // Visual radial menu will plug in here later without replacing InteractionCore.
+        );
     }
 
     public void updateHudInfo(int health, int armour, int hunger, int weaponId, int ammo,
@@ -72,21 +103,39 @@ public final class VostokUiBridge {
         runOnUiThread(() -> notificationManager.ShowError(text, duration));
     }
 
-    /** Server/native-authoritative visibility entry point. */
+    /**
+     * Current native compatibility entry point. It is intentionally NPC-only for this milestone.
+     */
     public void showInteraction(float distanceMeters) {
-        runOnUiThread(() -> interactionManager.show(distanceMeters));
+        showNpcInteraction(distanceMeters);
+    }
+
+    public void showNpcInteraction(float distanceMeters) {
+        runOnUiThread(() -> interactionCore.presentNpc(distanceMeters));
     }
 
     public void hideInteraction() {
-        runOnUiThread(interactionManager::hide);
+        runOnUiThread(interactionCore::hide);
     }
 
     /**
-     * Allows combat/vehicle/special systems to reserve action-button slots without
-     * changing InteractionUiManager coordinates directly.
+     * Future Java/native adapter point for authoritative candidate sets. Target kinds other than
+     * NPC remain filtered until their owning gameplay system explicitly enables them.
+     */
+    public void presentInteractionTargets(List<InteractionCore.Target> targets) {
+        runOnUiThread(() -> interactionCore.present(targets));
+    }
+
+    public void setInteractionTargetTypeEnabled(int targetType, boolean enabled) {
+        runOnUiThread(() -> interactionCore.setTargetTypeEnabled(targetType, enabled));
+    }
+
+    /**
+     * Allows combat/special UI to reserve action-button slots without hard-coding coordinates.
+     * In-vehicle engine/driving controls remain owned by the speedometer UI, not InteractionCore.
      */
     public void setInteractionContext(int flags, int reservedActionSlots) {
-        runOnUiThread(() -> interactionManager.setContext(flags, reservedActionSlots));
+        runOnUiThread(() -> interactionCore.setHudContext(flags, reservedActionSlots));
     }
 
     public void shutdown() {
@@ -96,12 +145,19 @@ public final class VostokUiBridge {
         destroyed = true;
         Runnable cleanup = () -> {
             notificationManager.Shutdown();
+            interactionCore.shutdown();
             interactionManager.shutdown();
         };
         if (Looper.myLooper() == Looper.getMainLooper()) {
             cleanup.run();
         } else {
             activity.runOnUiThread(cleanup);
+        }
+    }
+
+    private void onInteractionPressed() {
+        if (!destroyed) {
+            interactionCore.onPrimaryPressed();
         }
     }
 
