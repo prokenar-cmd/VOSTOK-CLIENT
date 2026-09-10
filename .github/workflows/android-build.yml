@@ -50,7 +50,7 @@ jobs:
           p.write_text(s)
           PY
 
-      - name: Apply VOSTOK native endpoint
+      - name: Apply VOSTOK native compatibility
         working-directory: client
         run: |
           python3 - <<'PY'
@@ -59,6 +59,8 @@ jobs:
           p.write_text(p.read_text().replace('141.95.190.142', '192.168.0.22').replace('1187', '7777'))
           p=Path('Jni source/jni/net/netrpc.cpp')
           p.write_text(p.read_text().replace('Connected to {B9C9BF}%.64s', 'Connected to VOSTOK DEV {B9C9BF}%.64s'))
+          p=Path('Jni source/jni/Android.mk')
+          p.write_text(p.read_text().replace('/vendor/RakNet/', '/vendor/raknet/'))
           PY
           ln -sf chatwindow.h "Jni source/jni/chatWindow.h"
 
