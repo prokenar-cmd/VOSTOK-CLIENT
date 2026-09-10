@@ -147,7 +147,7 @@ public final class VostokAuthDialog {
 
         LinearLayout content = new LinearLayout(context);
         content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(dp(28), dp(24), dp(28), dp(24));
+        content.setPadding(dp(28), dp(14), dp(28), dp(10));
         root.addView(content, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT
@@ -163,9 +163,9 @@ public final class VostokAuthDialog {
                 FrameLayout.LayoutParams.WRAP_CONTENT
         ));
 
-        TextView title = text("АВТОРИЗАЦИЯ", 28, bold, Color.WHITE);
+        TextView title = text("АВТОРИЗАЦИЯ", 24, bold, Color.WHITE);
         headerTexts.addView(title);
-        TextView subtitle = text("Войдите, чтобы продолжить игру", 16, regular, Color.argb(220, 235, 229, 224));
+        TextView subtitle = text("Войдите, чтобы продолжить игру", 14, regular, Color.argb(220, 235, 229, 224));
         LinearLayout.LayoutParams subLp = lpMatchWrap();
         subLp.topMargin = dp(3);
         headerTexts.addView(subtitle, subLp);
@@ -180,12 +180,12 @@ public final class VostokAuthDialog {
 
         emailLabel = text("Войти по почте", 15, bold, Color.WHITE);
         LinearLayout.LayoutParams labelLp = lpMatchWrap();
-        labelLp.topMargin = dp(24);
+        labelLp.topMargin = dp(12);
         content.addView(emailLabel, labelLp);
 
         emailInput = input("Введите ваш email", false);
         LinearLayout.LayoutParams inputLp = lpMatchWrap();
-        inputLp.topMargin = dp(8);
+        inputLp.topMargin = dp(6);
         content.addView(emailInput, inputLp);
 
         codeInput = input("Введите 6-значный код", true);
@@ -209,23 +209,23 @@ public final class VostokAuthDialog {
         primaryButton.setOnClickListener(v -> onPrimary());
         LinearLayout.LayoutParams primaryLp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(52)
+                dp(46)
         );
-        primaryLp.topMargin = dp(16);
+        primaryLp.topMargin = dp(10);
         content.addView(primaryButton, primaryLp);
 
         providerDivider = text("────────   ИЛИ ВОЙДИТЕ ЧЕРЕЗ   ────────", 12, regular,
                 Color.argb(170, 226, 216, 210));
         providerDivider.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams dividerLp = lpMatchWrap();
-        dividerLp.topMargin = dp(16);
+        dividerLp.topMargin = dp(10);
         content.addView(providerDivider, dividerLp);
 
         providerArea = new LinearLayout(context);
         providerArea.setOrientation(LinearLayout.HORIZONTAL);
         providerArea.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams providersLp = lpMatchWrap();
-        providersLp.topMargin = dp(12);
+        providersLp.topMargin = dp(7);
         content.addView(providerArea, providersLp);
         providerArea.addView(providerButton("G", "Google", "google", Color.rgb(244, 180, 0)), providerLp());
         providerArea.addView(providerButton("VK", "ВК", "vk", Color.rgb(0, 119, 255)), providerLp());
@@ -241,14 +241,15 @@ public final class VostokAuthDialog {
         });
         LinearLayout.LayoutParams devLp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(50)
+                dp(40)
         );
-        devLp.topMargin = dp(16);
+        devLp.topMargin = dp(7);
         content.addView(dev, devLp);
 
         TextView devHint = text("Временный технический вход для разработки", 12, regular,
                 Color.argb(165, 205, 197, 192));
         devHint.setGravity(Gravity.CENTER);
+        devHint.setVisibility(View.GONE);
         LinearLayout.LayoutParams devHintLp = lpMatchWrap();
         devHintLp.topMargin = dp(6);
         content.addView(devHint, devHintLp);
@@ -305,7 +306,7 @@ public final class VostokAuthDialog {
     }
 
     private LinearLayout.LayoutParams providerLp() {
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(50), 1.0f);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(42), 1.0f);
         lp.leftMargin = dp(4);
         lp.rightMargin = dp(4);
         return lp;
@@ -328,7 +329,7 @@ public final class VostokAuthDialog {
         edit.setGravity(Gravity.CENTER_VERTICAL);
         edit.setLayoutParams(new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(54)
+                dp(46)
         ));
         return edit;
     }
