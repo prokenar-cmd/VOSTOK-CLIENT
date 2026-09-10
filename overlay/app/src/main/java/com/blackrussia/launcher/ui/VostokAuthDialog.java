@@ -7,6 +7,7 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.text.InputType;
 import android.util.DisplayMetrics;
+import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.Window;
@@ -30,11 +31,15 @@ public final class VostokAuthDialog {
         void onDevLogin();
     }
 
+    private static final float REFERENCE_WIDTH = 1640.0f;
+    private static final float REFERENCE_HEIGHT = 720.0f;
+
     private final Context context;
     private final Listener listener;
     private final Dialog dialog;
     private final Typeface regular;
     private final Typeface bold;
+    private final float uiScale;
 
     private EditText emailInput;
     private EditText codeInput;
@@ -51,6 +56,12 @@ public final class VostokAuthDialog {
     public VostokAuthDialog(Context context, Listener listener) {
         this.context = context;
         this.listener = listener;
+
+        DisplayMetrics metrics = context.getResources().getDisplayMetrics();
+        float sx = metrics.widthPixels / REFERENCE_WIDTH;
+        float sy = metrics.heightPixels / REFERENCE_HEIGHT;
+        uiScale = Math.max(0.62f, Math.min(1.18f, Math.min(sx, sy)));
+
         Typeface r = ResourcesCompat.getFont(context, R.font.pt_root_ui_regular);
         Typeface b = ResourcesCompat.getFont(context, R.font.pt_root_ui_bold);
         regular = r == null ? Typeface.DEFAULT : r;
@@ -78,8 +89,8 @@ public final class VostokAuthDialog {
         Window window = dialog.getWindow();
         if (window != null) {
             DisplayMetrics metrics = context.getResources().getDisplayMetrics();
-            int preferred = Math.min((int) (metrics.widthPixels * 0.47f), dp(720));
-            int width = Math.max(preferred, dp(330));
+            int preferred = Math.min((int) (metrics.widthPixels * 0.47f), px(720));
+            int width = Math.max(preferred, px(330));
             width = Math.min(width, (int) (metrics.widthPixels * 0.92f));
             window.setLayout(width, WindowManager.LayoutParams.WRAP_CONTENT);
             window.setGravity(Gravity.CENTER);
@@ -142,12 +153,12 @@ public final class VostokAuthDialog {
 
     private View buildContent() {
         FrameLayout root = new FrameLayout(context);
-        root.setPadding(dp(1), dp(1), dp(1), dp(1));
+        root.setPadding(px(1), px(1), px(1), px(1));
         root.setBackground(panelBackground());
 
         LinearLayout content = new LinearLayout(context);
         content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(dp(28), dp(14), dp(28), dp(10));
+        content.setPadding(px(28), px(14), px(28), px(10));
         root.addView(content, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT
@@ -167,25 +178,25 @@ public final class VostokAuthDialog {
         headerTexts.addView(title);
         TextView subtitle = text("Войдите, чтобы продолжить игру", 14, regular, Color.argb(220, 235, 229, 224));
         LinearLayout.LayoutParams subLp = lpMatchWrap();
-        subLp.topMargin = dp(3);
+        subLp.topMargin = px(3);
         headerTexts.addView(subtitle, subLp);
 
         TextView close = text("×", 34, regular, Color.WHITE);
         close.setGravity(Gravity.CENTER);
         close.setOnClickListener(v -> dialog.dismiss());
-        FrameLayout.LayoutParams closeLp = new FrameLayout.LayoutParams(dp(44), dp(44), Gravity.TOP | Gravity.END);
-        closeLp.topMargin = dp(-10);
-        closeLp.rightMargin = dp(-10);
+        FrameLayout.LayoutParams closeLp = new FrameLayout.LayoutParams(px(44), px(44), Gravity.TOP | Gravity.END);
+        closeLp.topMargin = px(-10);
+        closeLp.rightMargin = px(-10);
         header.addView(close, closeLp);
 
         emailLabel = text("Войти по почте", 15, bold, Color.WHITE);
         LinearLayout.LayoutParams labelLp = lpMatchWrap();
-        labelLp.topMargin = dp(12);
+        labelLp.topMargin = px(12);
         content.addView(emailLabel, labelLp);
 
         emailInput = input("Введите ваш email", false);
         LinearLayout.LayoutParams inputLp = lpMatchWrap();
-        inputLp.topMargin = dp(6);
+        inputLp.topMargin = px(6);
         content.addView(emailInput, inputLp);
 
         codeInput = input("Введите 6-значный код", true);
@@ -194,13 +205,13 @@ public final class VostokAuthDialog {
 
         helperText = text("", 13, regular, Color.argb(205, 212, 202, 197));
         LinearLayout.LayoutParams helperLp = lpMatchWrap();
-        helperLp.topMargin = dp(7);
+        helperLp.topMargin = px(5);
         content.addView(helperText, helperLp);
 
         errorText = text("", 13, regular, Color.rgb(255, 153, 124));
         errorText.setVisibility(View.GONE);
         LinearLayout.LayoutParams errorLp = lpMatchWrap();
-        errorLp.topMargin = dp(7);
+        errorLp.topMargin = px(5);
         content.addView(errorText, errorLp);
 
         primaryButton = text("ПРОДОЛЖИТЬ", 17, bold, Color.WHITE);
@@ -209,23 +220,23 @@ public final class VostokAuthDialog {
         primaryButton.setOnClickListener(v -> onPrimary());
         LinearLayout.LayoutParams primaryLp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(46)
+                px(46)
         );
-        primaryLp.topMargin = dp(10);
+        primaryLp.topMargin = px(9);
         content.addView(primaryButton, primaryLp);
 
         providerDivider = text("────────   ИЛИ ВОЙДИТЕ ЧЕРЕЗ   ────────", 12, regular,
                 Color.argb(170, 226, 216, 210));
         providerDivider.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams dividerLp = lpMatchWrap();
-        dividerLp.topMargin = dp(10);
+        dividerLp.topMargin = px(9);
         content.addView(providerDivider, dividerLp);
 
         providerArea = new LinearLayout(context);
         providerArea.setOrientation(LinearLayout.HORIZONTAL);
         providerArea.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams providersLp = lpMatchWrap();
-        providersLp.topMargin = dp(7);
+        providersLp.topMargin = px(6);
         content.addView(providerArea, providersLp);
         providerArea.addView(providerButton("G", "Google", "google", Color.rgb(244, 180, 0)), providerLp());
         providerArea.addView(providerButton("VK", "ВК", "vk", Color.rgb(0, 119, 255)), providerLp());
@@ -241,18 +252,10 @@ public final class VostokAuthDialog {
         });
         LinearLayout.LayoutParams devLp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(40)
+                px(40)
         );
-        devLp.topMargin = dp(7);
+        devLp.topMargin = px(7);
         content.addView(dev, devLp);
-
-        TextView devHint = text("Временный технический вход для разработки", 12, regular,
-                Color.argb(165, 205, 197, 192));
-        devHint.setGravity(Gravity.CENTER);
-        devHint.setVisibility(View.GONE);
-        LinearLayout.LayoutParams devHintLp = lpMatchWrap();
-        devHintLp.topMargin = dp(6);
-        content.addView(devHint, devHintLp);
 
         return root;
     }
@@ -283,7 +286,7 @@ public final class VostokAuthDialog {
         LinearLayout box = new LinearLayout(context);
         box.setOrientation(LinearLayout.HORIZONTAL);
         box.setGravity(Gravity.CENTER);
-        box.setPadding(dp(8), 0, dp(8), 0);
+        box.setPadding(px(8), 0, px(8), 0);
         box.setBackground(secondaryButtonBackground());
         box.setOnClickListener(v -> {
             if (busy) return;
@@ -293,22 +296,22 @@ public final class VostokAuthDialog {
 
         TextView icon = text(mark, mark.length() > 1 ? 13 : 19, bold, markColor);
         icon.setGravity(Gravity.CENTER);
-        box.addView(icon, new LinearLayout.LayoutParams(dp(31), dp(42)));
+        box.addView(icon, new LinearLayout.LayoutParams(px(31), px(42)));
 
         TextView caption = text(label, 14, bold, Color.WHITE);
         LinearLayout.LayoutParams captionLp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
         );
-        captionLp.leftMargin = dp(3);
+        captionLp.leftMargin = px(3);
         box.addView(caption, captionLp);
         return box;
     }
 
     private LinearLayout.LayoutParams providerLp() {
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(42), 1.0f);
-        lp.leftMargin = dp(4);
-        lp.rightMargin = dp(4);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, px(42), 1.0f);
+        lp.leftMargin = px(4);
+        lp.rightMargin = px(4);
         return lp;
     }
 
@@ -318,9 +321,9 @@ public final class VostokAuthDialog {
         edit.setHint(hint);
         edit.setHintTextColor(Color.argb(150, 225, 217, 211));
         edit.setTextColor(Color.WHITE);
-        edit.setTextSize(15.0f);
+        edit.setTextSize(TypedValue.COMPLEX_UNIT_PX, scaledText(15));
         edit.setTypeface(regular);
-        edit.setPadding(dp(16), 0, dp(16), 0);
+        edit.setPadding(px(16), 0, px(16), 0);
         edit.setBackground(inputBackground());
         edit.setInputType(numeric
                 ? InputType.TYPE_CLASS_NUMBER
@@ -329,19 +332,23 @@ public final class VostokAuthDialog {
         edit.setGravity(Gravity.CENTER_VERTICAL);
         edit.setLayoutParams(new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(46)
+                px(46)
         ));
         return edit;
     }
 
-    private TextView text(String value, int sp, Typeface typeface, int color) {
+    private TextView text(String value, int size, Typeface typeface, int color) {
         TextView view = new TextView(context);
         view.setText(value);
-        view.setTextSize(sp);
+        view.setTextSize(TypedValue.COMPLEX_UNIT_PX, scaledText(size));
         view.setTypeface(typeface);
         view.setTextColor(color);
         view.setIncludeFontPadding(false);
         return view;
+    }
+
+    private float scaledText(int logicalSize) {
+        return logicalSize * 1.55f * uiScale;
     }
 
     private GradientDrawable panelBackground() {
@@ -353,16 +360,16 @@ public final class VostokAuthDialog {
                         Color.argb(247, 31, 30, 31)
                 }
         );
-        drawable.setCornerRadius(dp(26));
-        drawable.setStroke(dp(1), Color.argb(165, 255, 156, 112));
+        drawable.setCornerRadius(px(26));
+        drawable.setStroke(Math.max(1, px(1)), Color.argb(165, 255, 156, 112));
         return drawable;
     }
 
     private GradientDrawable inputBackground() {
         GradientDrawable drawable = new GradientDrawable();
         drawable.setColor(Color.argb(205, 39, 35, 35));
-        drawable.setCornerRadius(dp(13));
-        drawable.setStroke(dp(1), Color.argb(145, 235, 211, 198));
+        drawable.setCornerRadius(px(13));
+        drawable.setStroke(Math.max(1, px(1)), Color.argb(145, 235, 211, 198));
         return drawable;
     }
 
@@ -371,15 +378,15 @@ public final class VostokAuthDialog {
                 GradientDrawable.Orientation.LEFT_RIGHT,
                 new int[] { Color.rgb(255, 121, 44), Color.rgb(255, 54, 54) }
         );
-        drawable.setCornerRadius(dp(13));
+        drawable.setCornerRadius(px(13));
         return drawable;
     }
 
     private GradientDrawable secondaryButtonBackground() {
         GradientDrawable drawable = new GradientDrawable();
         drawable.setColor(Color.argb(190, 43, 39, 39));
-        drawable.setCornerRadius(dp(12));
-        drawable.setStroke(dp(1), Color.argb(120, 220, 205, 197));
+        drawable.setCornerRadius(px(12));
+        drawable.setStroke(Math.max(1, px(1)), Color.argb(120, 220, 205, 197));
         return drawable;
     }
 
@@ -390,7 +397,12 @@ public final class VostokAuthDialog {
         );
     }
 
-    private int dp(int value) {
-        return Math.round(value * context.getResources().getDisplayMetrics().density);
+    /**
+     * Launcher auth UI deliberately ignores Android density buckets and scales from the
+     * real landscape viewport. This keeps the complete modal, including DEV ВХОД,
+     * inside short 720p-class screens instead of turning every logical pixel into 2–3 dp pixels.
+     */
+    private int px(int value) {
+        return Math.round(value * uiScale);
     }
 }
