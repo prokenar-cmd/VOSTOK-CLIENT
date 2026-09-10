@@ -68,8 +68,10 @@ jobs:
           yes | ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null || true
           ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager "platforms;android-30" "build-tools;30.0.3"
 
-      - name: Install legacy NDK r16b for JNI
+      - name: Install legacy NDK r16b compatibility
         run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libncurses5 libtinfo5
           curl -L --fail --retry 3 -o /tmp/ndk.zip https://dl.google.com/android/repository/android-ndk-r16b-linux-x86_64.zip
           unzip -q /tmp/ndk.zip -d $HOME
           echo "NDK16=$HOME/android-ndk-r16b" >> $GITHUB_ENV
