@@ -32,6 +32,7 @@ jobs:
           rm -f client/app/src/main/java/com/blackrussia/launcher/other/UnZipCallback.java
           python3 tools/apply_vostok_ui_foundation.py
           python3 tools/apply_vostok_native_ui_bridge.py
+          python3 tools/validate_account_core.py client
 
       - name: Apply VOSTOK Android build compatibility
         working-directory: client
