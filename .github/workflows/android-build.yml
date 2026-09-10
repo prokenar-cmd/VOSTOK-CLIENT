@@ -43,11 +43,11 @@ jobs:
               s=s.replace('android {', 'android {\n    namespace "com.blackrussia.game"', 1)
           s=s.replace("apply plugin: 'com.google.gms.google-services'", "")
           p.write_text(s)
-          wp=Path('gradle/wrapper/gradle-wrapper.properties')
-          w=wp.read_text()
+          p=Path('gradle/wrapper/gradle-wrapper.properties')
+          s=p.read_text()
           import re
-          w=re.sub(r'distributionUrl=.*', 'distributionUrl=https\\://services.gradle.org/distributions/gradle-8.2-bin.zip', w)
-          wp.write_text(w)
+          s=re.sub(r'distributionUrl=.*', 'distributionUrl=https\\://services.gradle.org/distributions/gradle-8.2-bin.zip', s)
+          p.write_text(s)
           PY
 
       - name: Apply VOSTOK native endpoint
@@ -56,12 +56,11 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           p=Path('Jni source/jni/util/CJavaWrapper.cpp')
-          s=p.read_text().replace('141.95.190.142', '192.168.0.22').replace('1187', '7777')
-          p.write_text(s)
+          p.write_text(p.read_text().replace('141.95.190.142', '192.168.0.22').replace('1187', '7777'))
           p=Path('Jni source/jni/net/netrpc.cpp')
-          s=p.read_text().replace('Connected to {B9C9BF}%.64s', 'Connected to VOSTOK DEV {B9C9BF}%.64s')
-          p.write_text(s)
+          p.write_text(p.read_text().replace('Connected to {B9C9BF}%.64s', 'Connected to VOSTOK DEV {B9C9BF}%.64s'))
           PY
+          ln -sf chatwindow.h "Jni source/jni/chatWindow.h"
 
       - name: Install Android SDK packages
         run: |
