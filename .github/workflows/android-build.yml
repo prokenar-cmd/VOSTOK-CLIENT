@@ -1,0 +1,107 @@
+name: VOSTOK Android Build
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout VOSTOK orchestration
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Fetch pinned Parad1st client source
+        run: |
+          git clone https://github.com/Parad1st/Black-Russia-Source.git client
+          cd client
+          git checkout b7574b3ad246f31a15d15a28075936dd62e65fad
+          git rev-parse HEAD
+
+      - name: Apply VOSTOK build compatibility
+        working-directory: client
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('build.gradle')
+          s=p.read_text()
+          s=s.replace("google()\n        jcenter()", "google()\n        mavenCentral()\n        jcenter()")
+          s=s.replace("classpath 'com.android.tools.build:gradle:7.0.4'", "classpath 'com.android.tools.build:gradle:8.2.1'")
+          s=s.replace("        classpath 'com.google.gms:google-services:4.3.3'\n", "")
+          p.write_text(s)
+          p=Path('app/build.gradle')
+          s=p.read_text()
+          if 'namespace ' not in s:
+              s=s.replace('android {', 'android {\n    namespace "com.blackrussia.game"', 1)
+          s=s.replace("apply plugin: 'com.google.gms.google-services'", "")
+          p.write_text(s)
+          wp=Path('gradle/wrapper/gradle-wrapper.properties')
+          w=wp.read_text()
+          import re
+          w=re.sub(r'distributionUrl=.*', 'distributionUrl=https\\://services.gradle.org/distributions/gradle-8.2-bin.zip', w)
+          wp.write_text(w)
+          PY
+
+      - name: Apply VOSTOK native endpoint
+        working-directory: client
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('Jni source/jni/util/CJavaWrapper.cpp')
+          s=p.read_text()
+          s=s.replace('141.95.190.142', '192.168.0.22').replace('1187', '7777')
+          p.write_text(s)
+          p=Path('Jni source/jni/net/netrpc.cpp')
+          s=p.read_text()
+          s=s.replace('Connected to {B9C9BF}%.64s', 'Connected to VOSTOK DEV {B9C9BF}%.64s')
+          p.write_text(s)
+          PY
+
+      - name: Install Android SDK packages
+        run: |
+          yes | ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null || true
+          ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager "platforms;android-30" "build-tools;30.0.3"
+
+      - name: Install legacy NDK r16b for JNI
+        run: |
+          curl -L --fail --retry 3 -o /tmp/ndk.zip https://dl.google.com/android/repository/android-ndk-r16b-linux-x86_64.zip
+          unzip -q /tmp/ndk.zip -d $HOME
+          echo "NDK16=$HOME/android-ndk-r16b" >> $GITHUB_ENV
+
+      - name: Build JNI libsamp.so
+        working-directory: client/Jni source
+        run: |
+          "$NDK16/ndk-build" -j2 NDK_PROJECT_PATH=. APP_BUILD_SCRIPT=jni/Android.mk NDK_APPLICATION_MK=jni/Application.mk V=1
+          test -f libs/armeabi-v7a/libsamp.so
+          cp -f libs/armeabi-v7a/libsamp.so ../app/src/main/jniLibs/armeabi-v7a/libsamp.so
+          sha256sum libs/armeabi-v7a/libsamp.so
+
+      - name: Build APK
+        working-directory: client
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace :app:assembleDebug
+          test -f app/build/outputs/apk/debug/app-debug.apk
+          sha256sum app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: VOSTOK-client-debug
+          path: client/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Upload source-built libsamp
+        uses: actions/upload-artifact@v4
+        with:
+          name: VOSTOK-libsamp-armeabi-v7a
+          path: client/Jni source/libs/armeabi-v7a/libsamp.so
+          if-no-files-found: error
