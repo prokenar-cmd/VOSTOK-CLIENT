@@ -41,49 +41,26 @@ jobs:
           p = Path('client/app/src/main/java/com/blackrussia/launcher/ui/VostokLauncherView.java')
           s = p.read_text()
           anchor = '    private static final RectF PLAY = new RectF(1380, 620, 1792, 724);'
-          if s.count(anchor) != 1:
-              raise SystemExit('launcher PLAY anchor mismatch')
-          s = s.replace(anchor, '    private static final float DESIGN_WIDTH = 1891.0f;\n    private static final float DESIGN_HEIGHT = 831.0f;\n    ' + anchor.strip(), 1)
+          if 'DESIGN_WIDTH = 1891.0f' not in s:
+              if s.count(anchor) != 1:
+                  raise SystemExit('launcher PLAY anchor mismatch')
+              s = s.replace(anchor, '    private static final float DESIGN_WIDTH = 1891.0f;\n    private static final float DESIGN_HEIGHT = 831.0f;\n    ' + anchor.strip(), 1)
           old = 'scale = Math.max(getWidth() / bitmapW, getHeight() / bitmapH);\n        float drawW = bitmapW * scale, drawH = bitmapH * scale;'
-          if s.count(old) != 1:
-              raise SystemExit('launcher scale block mismatch')
-          new = 'scale = Math.max(getWidth() / DESIGN_WIDTH, getHeight() / DESIGN_HEIGHT);\n        float drawW = DESIGN_WIDTH * scale, drawH = DESIGN_HEIGHT * scale;'
-          p.write_text(s.replace(old, new, 1))
+          if old in s:
+              new = 'scale = Math.max(getWidth() / DESIGN_WIDTH, getHeight() / DESIGN_HEIGHT);\n        float drawW = DESIGN_WIDTH * scale, drawH = DESIGN_HEIGHT * scale;'
+              s = s.replace(old, new, 1)
+          p.write_text(s)
           PY
           rm -f client/app/src/main/res/drawable-nodpi/vostok_launcher_reference.webp
           cp client/app/src/main/res/drawable/mylogo.jpg client/app/src/main/res/drawable-nodpi/vostok_launcher_reference.jpg
           file client/app/src/main/res/drawable-nodpi/vostok_launcher_reference.jpg
           grep -q 'DESIGN_WIDTH = 1891.0f' client/app/src/main/java/com/blackrussia/launcher/ui/VostokLauncherView.java
 
-      - name: Keep DEV login visible on landscape
+      - name: Verify compact DEV auth layout
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('client/app/src/main/java/com/blackrussia/launcher/ui/VostokAuthDialog.java')
-          s = p.read_text()
-          replacements = [
-              ('content.setPadding(dp(28), dp(24), dp(28), dp(24));', 'content.setPadding(dp(28), dp(14), dp(28), dp(10));'),
-              ('TextView title = text("АВТОРИЗАЦИЯ", 28, bold, Color.WHITE);', 'TextView title = text("АВТОРИЗАЦИЯ", 24, bold, Color.WHITE);'),
-              ('TextView subtitle = text("Войдите, чтобы продолжить игру", 16, regular, Color.argb(220, 235, 229, 224));', 'TextView subtitle = text("Войдите, чтобы продолжить игру", 14, regular, Color.argb(220, 235, 229, 224));'),
-              ('labelLp.topMargin = dp(24);', 'labelLp.topMargin = dp(12);'),
-              ('inputLp.topMargin = dp(8);', 'inputLp.topMargin = dp(6);'),
-              ('                dp(52)\n        );\n        primaryLp.topMargin = dp(16);', '                dp(46)\n        );\n        primaryLp.topMargin = dp(10);'),
-              ('dividerLp.topMargin = dp(16);', 'dividerLp.topMargin = dp(10);'),
-              ('providersLp.topMargin = dp(12);', 'providersLp.topMargin = dp(7);'),
-              ('LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(50), 1.0f);', 'LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(42), 1.0f);'),
-              ('                dp(50)\n        );\n        devLp.topMargin = dp(16);', '                dp(40)\n        );\n        devLp.topMargin = dp(7);'),
-              ('devHint.setGravity(Gravity.CENTER);', 'devHint.setGravity(Gravity.CENTER);\n        devHint.setVisibility(View.GONE);'),
-              ('                dp(54)\n        ));', '                dp(46)\n        ));')
-          ]
-          for old, new in replacements:
-              if s.count(old) != 1:
-                  raise SystemExit('auth layout anchor mismatch: ' + old[:50])
-              s = s.replace(old, new, 1)
-          p.write_text(s)
-          if 'DEV ВХОД' not in s:
-              raise SystemExit('DEV button missing after compact patch')
-          PY
           grep -q 'DEV ВХОД' client/app/src/main/java/com/blackrussia/launcher/ui/VostokAuthDialog.java
+          grep -q 'devLp.topMargin = dp(7)' client/app/src/main/java/com/blackrussia/launcher/ui/VostokAuthDialog.java
+          grep -q 'content.setPadding(dp(28), dp(14), dp(28), dp(10))' client/app/src/main/java/com/blackrussia/launcher/ui/VostokAuthDialog.java
 
       - name: Apply VOSTOK Android build compatibility
         working-directory: client
