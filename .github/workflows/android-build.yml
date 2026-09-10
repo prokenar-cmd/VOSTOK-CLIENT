@@ -29,6 +29,7 @@ jobs:
       - name: Apply VOSTOK source overlay
         run: |
           cp -a overlay/. client/
+          rm -f client/app/src/main/java/com/blackrussia/launcher/other/UnZipCallback.java
 
       - name: Apply VOSTOK Android build compatibility
         working-directory: client
