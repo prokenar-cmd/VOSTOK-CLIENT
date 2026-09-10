@@ -56,12 +56,10 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           p=Path('Jni source/jni/util/CJavaWrapper.cpp')
-          s=p.read_text()
-          s=s.replace('141.95.190.142', '192.168.0.22').replace('1187', '7777')
+          s=p.read_text().replace('141.95.190.142', '192.168.0.22').replace('1187', '7777')
           p.write_text(s)
           p=Path('Jni source/jni/net/netrpc.cpp')
-          s=p.read_text()
-          s=s.replace('Connected to {B9C9BF}%.64s', 'Connected to VOSTOK DEV {B9C9BF}%.64s')
+          s=p.read_text().replace('Connected to {B9C9BF}%.64s', 'Connected to VOSTOK DEV {B9C9BF}%.64s')
           p.write_text(s)
           PY
 
@@ -79,7 +77,8 @@ jobs:
       - name: Build JNI libsamp.so
         working-directory: client/Jni source
         run: |
-          "$NDK16/ndk-build" -j2 NDK_PROJECT_PATH=. APP_BUILD_SCRIPT=jni/Android.mk NDK_APPLICATION_MK=jni/Application.mk V=1
+          rm -rf obj libs
+          "$NDK16/ndk-build" -j2 NDK_PROJECT_PATH=. APP_BUILD_SCRIPT=jni/Android.mk NDK_APPLICATION_MK=jni/Application.mk
           test -f libs/armeabi-v7a/libsamp.so
           cp -f libs/armeabi-v7a/libsamp.so ../app/src/main/jniLibs/armeabi-v7a/libsamp.so
           sha256sum libs/armeabi-v7a/libsamp.so
