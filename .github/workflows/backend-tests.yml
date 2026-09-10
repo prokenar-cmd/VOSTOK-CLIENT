@@ -1,0 +1,35 @@
+name: VOSTOK Account Backend Tests
+
+on:
+  push:
+    branches: [ main, account-backend-v1 ]
+    paths:
+      - 'backend/**'
+      - 'docs/ACCOUNT_BACKEND.md'
+      - '.github/workflows/backend-tests.yml'
+  pull_request:
+    paths:
+      - 'backend/**'
+      - 'docs/ACCOUNT_BACKEND.md'
+      - '.github/workflows/backend-tests.yml'
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Compile Python
+        run: python -m compileall -q app tests
+      - name: Run backend tests
+        run: pytest -q
+      - name: Import app
+        run: python -c "from app.main import app; print(app.title, app.version)"
