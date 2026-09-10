@@ -34,7 +34,7 @@ jobs:
           python3 tools/apply_vostok_native_ui_bridge.py
           python3 tools/validate_account_core.py client
 
-      - name: Fix launcher rendering coordinate space and background codec
+      - name: Fix launcher coordinate space and recovery background
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -50,11 +50,10 @@ jobs:
           new = 'scale = Math.max(getWidth() / DESIGN_WIDTH, getHeight() / DESIGN_HEIGHT);\n        float drawW = DESIGN_WIDTH * scale, drawH = DESIGN_HEIGHT * scale;'
           p.write_text(s.replace(old, new, 1))
           PY
-          sudo apt-get update -qq
-          sudo apt-get install -y imagemagick
-          convert client/app/src/main/res/drawable-nodpi/vostok_launcher_reference.webp -resize 1891x831\! -quality 92 client/app/src/main/res/drawable-nodpi/vostok_launcher_reference.jpg
-          rm client/app/src/main/res/drawable-nodpi/vostok_launcher_reference.webp
-          identify client/app/src/main/res/drawable-nodpi/vostok_launcher_reference.jpg
+          rm -f client/app/src/main/res/drawable-nodpi/vostok_launcher_reference.webp
+          cp client/app/src/main/res/drawable/mylogo.jpg client/app/src/main/res/drawable-nodpi/vostok_launcher_reference.jpg
+          file client/app/src/main/res/drawable-nodpi/vostok_launcher_reference.jpg
+          grep -q 'DESIGN_WIDTH = 1891.0f' client/app/src/main/java/com/blackrussia/launcher/ui/VostokLauncherView.java
 
       - name: Apply VOSTOK Android build compatibility
         working-directory: client
