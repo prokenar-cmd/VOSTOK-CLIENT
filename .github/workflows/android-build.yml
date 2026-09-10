@@ -11,10 +11,10 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Checkout VOSTOK orchestration
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -30,6 +30,7 @@ jobs:
         run: |
           cp -a overlay/. client/
           rm -f client/app/src/main/java/com/blackrussia/launcher/other/UnZipCallback.java
+          python3 tools/apply_vostok_ui_foundation.py
 
       - name: Apply VOSTOK Android build compatibility
         working-directory: client
@@ -37,7 +38,7 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           Path('build.gradle').write_text('''// VOSTOK CI build configuration\nbuildscript {\n    repositories {\n        mavenCentral()\n        google()\n        jcenter()\n    }\n    dependencies {\n        classpath 'com.android.tools.build:gradle:8.2.1'\n    }\n}\n\nallprojects {\n    repositories {\n        mavenCentral()\n        google()\n        jcenter()\n        maven { url "https://jitpack.io" }\n    }\n}\n\ntask clean(type: Delete) {\n    delete rootProject.buildDir\n}\n''')
-          Path('app/build.gradle').write_text('''apply plugin: 'com.android.application'\n\nandroid {\n    namespace "com.blackrussia.game"\n    compileSdkVersion 30\n    buildToolsVersion "30.0.1"\n\n    compileOptions {\n        sourceCompatibility 1.8\n        targetCompatibility 1.8\n    }\n\n    defaultConfig {\n        minSdkVersion 17\n        targetSdkVersion 28\n        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"\n        applicationId "com.blackrussia.game"\n        versionName "lr-build-stable"\n        versionCode 10\n        vectorDrawables.useSupportLibrary = true\n        multiDexEnabled = true\n        ndk { abiFilters 'armeabi-v7a' }\n    }\n}\n\ndependencies {\n    implementation fileTree(dir: "libs", include: ["*.jar"])\n    implementation 'androidx.appcompat:appcompat:1.1.0'\n    implementation 'com.google.android.material:material:1.0.0'\n    implementation 'com.tuyenmonkey:mkloader:1.4.0'\n    implementation group: 'org.ini4j', name: 'ini4j', version: '0.5.4'\n    implementation 'androidx.constraintlayout:constraintlayout:2.0.4'\n    implementation "com.github.skydoves:colorpickerpreference:2.0.4"\n    testImplementation 'junit:junit:4.12'\n    implementation 'com.github.Triggertrap:SeekArc:v1.1'\n    implementation 'com.akexorcist:round-corner-progress-bar:2.1.2'\n    implementation 'io.github.dinuscxj:circleprogressbar:1.4.1'\n    implementation 'com.makeramen:roundedimageview:2.3.0'\n    implementation 'com.github.bumptech.glide:glide:4.13.0'\n    annotationProcessor 'com.github.bumptech.glide:compiler:4.13.0'\n    implementation 'com.google.firebase:firebase-database:20.0.4'\n    implementation 'com.github.hzy3774:AndroidP7zip:v1.7.2'\n    implementation 'com.squareup.retrofit2:converter-gson:2.1.0'\n    implementation platform('com.google.firebase:firebase-bom:29.2.1')\n    implementation 'com.liulishuo.filedownloader:library:1.7.7'\n}\n''')
+          Path('app/build.gradle').write_text('''apply plugin: 'com.android.application'\n\nandroid {\n    namespace "com.blackrussia.game"\n    compileSdkVersion 30\n\n    compileOptions {\n        sourceCompatibility 1.8\n        targetCompatibility 1.8\n    }\n\n    defaultConfig {\n        minSdkVersion 17\n        targetSdkVersion 28\n        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"\n        applicationId "com.blackrussia.game"\n        versionName "vostok-dev-0.1"\n        versionCode 10\n        vectorDrawables.useSupportLibrary = true\n        multiDexEnabled = true\n        ndk { abiFilters 'armeabi-v7a' }\n    }\n}\n\ndependencies {\n    implementation fileTree(dir: "libs", include: ["*.jar"])\n    implementation 'androidx.appcompat:appcompat:1.1.0'\n    implementation 'com.google.android.material:material:1.0.0'\n    implementation 'com.tuyenmonkey:mkloader:1.4.0'\n    implementation group: 'org.ini4j', name: 'ini4j', version: '0.5.4'\n    implementation 'androidx.constraintlayout:constraintlayout:2.0.4'\n    implementation "com.github.skydoves:colorpickerpreference:2.0.4"\n    testImplementation 'junit:junit:4.12'\n    implementation 'com.github.Triggertrap:SeekArc:v1.1'\n    implementation 'com.akexorcist:round-corner-progress-bar:2.1.2'\n    implementation 'io.github.dinuscxj:circleprogressbar:1.4.1'\n    implementation 'com.makeramen:roundedimageview:2.3.0'\n    implementation 'com.github.bumptech.glide:glide:4.13.0'\n    annotationProcessor 'com.github.bumptech.glide:compiler:4.13.0'\n    implementation 'com.google.firebase:firebase-database:20.0.4'\n    implementation 'com.github.hzy3774:AndroidP7zip:v1.7.2'\n    implementation 'com.squareup.retrofit2:converter-gson:2.1.0'\n    implementation platform('com.google.firebase:firebase-bom:29.2.1')\n    implementation 'com.liulishuo.filedownloader:library:1.7.7'\n}\n''')
           p=Path('gradle/wrapper/gradle-wrapper.properties')
           s=p.read_text()
           import re
@@ -62,7 +63,7 @@ jobs:
       - name: Install Android SDK packages
         run: |
           yes | ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null || true
-          ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager "platforms;android-30" "build-tools;30.0.3"
+          ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager "platforms;android-30" "build-tools;34.0.0"
 
       - name: Install legacy NDK r16b compatibility
         run: |
