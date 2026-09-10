@@ -34,13 +34,35 @@ jobs:
           python3 tools/apply_vostok_native_ui_bridge.py
           python3 tools/validate_account_core.py client
 
+      - name: Fix launcher rendering coordinate space and background codec
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('client/app/src/main/java/com/blackrussia/launcher/ui/VostokLauncherView.java')
+          s = p.read_text()
+          anchor = '    private static final RectF PLAY = new RectF(1380, 620, 1792, 724);'
+          if s.count(anchor) != 1:
+              raise SystemExit('launcher PLAY anchor mismatch')
+          s = s.replace(anchor, '    private static final float DESIGN_WIDTH = 1891.0f;\n    private static final float DESIGN_HEIGHT = 831.0f;\n    ' + anchor.strip(), 1)
+          old = 'scale = Math.max(getWidth() / bitmapW, getHeight() / bitmapH);\n        float drawW = bitmapW * scale, drawH = bitmapH * scale;'
+          if s.count(old) != 1:
+              raise SystemExit('launcher scale block mismatch')
+          new = 'scale = Math.max(getWidth() / DESIGN_WIDTH, getHeight() / DESIGN_HEIGHT);\n        float drawW = DESIGN_WIDTH * scale, drawH = DESIGN_HEIGHT * scale;'
+          p.write_text(s.replace(old, new, 1))
+          PY
+          sudo apt-get update -qq
+          sudo apt-get install -y imagemagick
+          convert client/app/src/main/res/drawable-nodpi/vostok_launcher_reference.webp -resize 1891x831\! -quality 92 client/app/src/main/res/drawable-nodpi/vostok_launcher_reference.jpg
+          rm client/app/src/main/res/drawable-nodpi/vostok_launcher_reference.webp
+          identify client/app/src/main/res/drawable-nodpi/vostok_launcher_reference.jpg
+
       - name: Apply VOSTOK Android build compatibility
         working-directory: client
         run: |
           python3 - <<'PY'
           from pathlib import Path
           Path('build.gradle').write_text('''// VOSTOK CI build configuration\nbuildscript {\n    repositories {\n        mavenCentral()\n        google()\n        jcenter()\n    }\n    dependencies {\n        classpath 'com.android.tools.build:gradle:8.2.1'\n    }\n}\n\nallprojects {\n    repositories {\n        mavenCentral()\n        google()\n        jcenter()\n        maven { url "https://jitpack.io" }\n    }\n}\n\ntask clean(type: Delete) {\n    delete rootProject.buildDir\n}\n''')
-          Path('app/build.gradle').write_text('''apply plugin: 'com.android.application'\n\nandroid {\n    namespace "com.blackrussia.game"\n    compileSdkVersion 30\n\n    compileOptions {\n        sourceCompatibility 1.8\n        targetCompatibility 1.8\n    }\n\n    defaultConfig {\n        minSdkVersion 17\n        targetSdkVersion 28\n        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"\n        applicationId "com.blackrussia.game"\n        versionName "vostok-dev-0.1"\n        versionCode 10\n        vectorDrawables.useSupportLibrary = true\n        multiDexEnabled = true\n        ndk { abiFilters 'armeabi-v7a' }\n    }\n}\n\ndependencies {\n    implementation fileTree(dir: "libs", include: ["*.jar"])\n    implementation 'androidx.appcompat:appcompat:1.1.0'\n    implementation 'com.google.android.material:material:1.0.0'\n    implementation 'com.tuyenmonkey:mkloader:1.4.0'\n    implementation group: 'org.ini4j', name: 'ini4j', version: '0.5.4'\n    implementation 'androidx.constraintlayout:constraintlayout:2.0.4'\n    implementation "com.github.skydoves:colorpickerpreference:2.0.4"\n    testImplementation 'junit:junit:4.12'\n    implementation 'com.github.Triggertrap:SeekArc:v1.1'\n    implementation 'com.akexorcist:round-corner-progress-bar:2.1.2'\n    implementation 'io.github.dinuscxj:circleprogressbar:1.4.1'\n    implementation 'com.makeramen:roundedimageview:2.3.0'\n    implementation 'com.github.bumptech.glide:glide:4.13.0'\n    annotationProcessor 'com.github.bumptech.glide:compiler:4.13.0'\n    implementation 'com.google.firebase:firebase-database:20.0.4'\n    implementation 'com.github.hzy3774:AndroidP7zip:v1.7.2'\n    implementation 'com.squareup.retrofit2:converter-gson:2.1.0'\n    implementation platform('com.google.firebase:firebase-bom:29.2.1')\n    implementation 'com.liulishuo.filedownloader:library:1.7.7'\n}\n''')
+          Path('app/build.gradle').write_text('''apply plugin: 'com.android.application'\n\nandroid {\n    namespace "com.blackrussia.game"\n    compileSdkVersion 30\n\n    compileOptions {\n        sourceCompatibility 1.8\n        targetCompatibility 1.8\n    }\n\n    defaultConfig {\n        minSdkVersion 17\n        targetSdkVersion 28\n        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"\n        applicationId "com.vostok.roleplay"\n        versionName "vostok-dev-0.1.7"\n        versionCode 17\n        vectorDrawables.useSupportLibrary = true\n        multiDexEnabled = true\n        ndk { abiFilters 'armeabi-v7a' }\n    }\n}\n\ndependencies {\n    implementation fileTree(dir: "libs", include: ["*.jar"])\n    implementation 'androidx.appcompat:appcompat:1.1.0'\n    implementation 'com.google.android.material:material:1.0.0'\n    implementation 'com.tuyenmonkey:mkloader:1.4.0'\n    implementation group: 'org.ini4j', name: 'ini4j', version: '0.5.4'\n    implementation 'androidx.constraintlayout:constraintlayout:2.0.4'\n    implementation "com.github.skydoves:colorpickerpreference:2.0.4"\n    testImplementation 'junit:junit:4.12'\n    implementation 'com.github.Triggertrap:SeekArc:v1.1'\n    implementation 'com.akexorcist:round-corner-progress-bar:2.1.2'\n    implementation 'io.github.dinuscxj:circleprogressbar:1.4.1'\n    implementation 'com.makeramen:roundedimageview:2.3.0'\n    implementation 'com.github.bumptech.glide:glide:4.13.0'\n    annotationProcessor 'com.github.bumptech.glide:compiler:4.13.0'\n    implementation 'com.google.firebase:firebase-database:20.0.4'\n    implementation 'com.github.hzy3774:AndroidP7zip:v1.7.2'\n    implementation 'com.squareup.retrofit2:converter-gson:2.1.0'\n    implementation platform('com.google.firebase:firebase-bom:29.2.1')\n    implementation 'com.liulishuo.filedownloader:library:1.7.7'\n}\n''')
           p=Path('gradle/wrapper/gradle-wrapper.properties')
           s=p.read_text()
           import re
@@ -91,6 +113,15 @@ jobs:
           ./gradlew --no-daemon --stacktrace :app:assembleDebug
           test -f app/build/outputs/apk/debug/app-debug.apk
           sha256sum app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Verify VOSTOK package and launcher resource
+        working-directory: client
+        run: |
+          AAPT="${ANDROID_HOME}/build-tools/34.0.0/aapt"
+          "$AAPT" dump badging app/build/outputs/apk/debug/app-debug.apk | tee /tmp/vostok_badging.txt
+          grep -q "package: name='com.vostok.roleplay'" /tmp/vostok_badging.txt
+          grep -q "application-label:'VOSTOK'" /tmp/vostok_badging.txt
+          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q 'vostok_launcher_reference.jpg'
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
