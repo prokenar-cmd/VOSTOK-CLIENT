@@ -10,26 +10,35 @@ import com.blackrussia.game.gui.Notification;
  * Single Java-side UI bridge for VOSTOK gameplay overlays.
  *
  * Native/JNI-facing methods remain on NvEventQueueActivity for binary compatibility;
- * they delegate here. Future Interaction, objective, courier and other gameplay UI
- * modules should be owned/routed through this bridge instead of creating parallel JNI paths.
+ * gameplay overlays are owned here so HUD, notifications, interaction, objectives and
+ * future job UI do not grow separate parallel bridges.
  */
 public final class VostokUiBridge {
     private final Activity activity;
     private final HudManager hudManager;
     private final Notification notificationManager;
+    private final InteractionUiManager interactionManager;
     private volatile boolean destroyed;
 
-    public VostokUiBridge(Activity activity) {
+    public VostokUiBridge(Activity activity, Runnable interactionAction) {
         this.activity = activity;
         hudManager = new HudManager(activity);
         notificationManager = new Notification(activity);
+        interactionManager = new InteractionUiManager(activity, () -> {
+            if (interactionAction != null) {
+                interactionAction.run();
+            }
+        });
     }
 
     public void updateHudInfo(int health, int armour, int hunger, int weaponId, int ammo,
                               int playerId, int money, int wanted) {
-        runOnUiThread(() -> hudManager.UpdateHudInfo(
-                health, armour, hunger, weaponId, ammo, playerId, money, wanted
-        ));
+        runOnUiThread(() -> {
+            hudManager.UpdateHudInfo(
+                    health, armour, hunger, weaponId, ammo, playerId, money, wanted
+            );
+            interactionManager.setWeaponActive(usesCombatControls(weaponId));
+        });
     }
 
     public void showHud() {
@@ -63,12 +72,32 @@ public final class VostokUiBridge {
         runOnUiThread(() -> notificationManager.ShowError(text, duration));
     }
 
+    /** Server/native-authoritative visibility entry point. */
+    public void showInteraction(float distanceMeters) {
+        runOnUiThread(() -> interactionManager.show(distanceMeters));
+    }
+
+    public void hideInteraction() {
+        runOnUiThread(interactionManager::hide);
+    }
+
+    /**
+     * Allows combat/vehicle/special systems to reserve action-button slots without
+     * changing InteractionUiManager coordinates directly.
+     */
+    public void setInteractionContext(int flags, int reservedActionSlots) {
+        runOnUiThread(() -> interactionManager.setContext(flags, reservedActionSlots));
+    }
+
     public void shutdown() {
         if (destroyed) {
             return;
         }
         destroyed = true;
-        Runnable cleanup = notificationManager::Shutdown;
+        Runnable cleanup = () -> {
+            notificationManager.Shutdown();
+            interactionManager.shutdown();
+        };
         if (Looper.myLooper() == Looper.getMainLooper()) {
             cleanup.run();
         } else {
@@ -89,5 +118,10 @@ public final class VostokUiBridge {
                 }
             });
         }
+    }
+
+    private static boolean usesCombatControls(int weaponId) {
+        return (weaponId >= 16 && weaponId <= 18)
+                || (weaponId >= 22 && weaponId <= 39);
     }
 }

@@ -31,6 +31,7 @@ jobs:
           cp -a overlay/. client/
           rm -f client/app/src/main/java/com/blackrussia/launcher/other/UnZipCallback.java
           python3 tools/apply_vostok_ui_foundation.py
+          python3 tools/apply_vostok_native_ui_bridge.py
 
       - name: Apply VOSTOK Android build compatibility
         working-directory: client
