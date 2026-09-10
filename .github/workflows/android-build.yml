@@ -55,13 +55,43 @@ jobs:
           file client/app/src/main/res/drawable-nodpi/vostok_launcher_reference.jpg
           grep -q 'DESIGN_WIDTH = 1891.0f' client/app/src/main/java/com/blackrussia/launcher/ui/VostokLauncherView.java
 
+      - name: Keep DEV login visible on landscape
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('client/app/src/main/java/com/blackrussia/launcher/ui/VostokAuthDialog.java')
+          s = p.read_text()
+          replacements = [
+              ('content.setPadding(dp(28), dp(24), dp(28), dp(24));', 'content.setPadding(dp(28), dp(14), dp(28), dp(10));'),
+              ('TextView title = text("АВТОРИЗАЦИЯ", 28, bold, Color.WHITE);', 'TextView title = text("АВТОРИЗАЦИЯ", 24, bold, Color.WHITE);'),
+              ('TextView subtitle = text("Войдите, чтобы продолжить игру", 16, regular, Color.argb(220, 235, 229, 224));', 'TextView subtitle = text("Войдите, чтобы продолжить игру", 14, regular, Color.argb(220, 235, 229, 224));'),
+              ('labelLp.topMargin = dp(24);', 'labelLp.topMargin = dp(12);'),
+              ('inputLp.topMargin = dp(8);', 'inputLp.topMargin = dp(6);'),
+              ('                dp(52)\n        );\n        primaryLp.topMargin = dp(16);', '                dp(46)\n        );\n        primaryLp.topMargin = dp(10);'),
+              ('dividerLp.topMargin = dp(16);', 'dividerLp.topMargin = dp(10);'),
+              ('providersLp.topMargin = dp(12);', 'providersLp.topMargin = dp(7);'),
+              ('LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(50), 1.0f);', 'LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(42), 1.0f);'),
+              ('                dp(50)\n        );\n        devLp.topMargin = dp(16);', '                dp(40)\n        );\n        devLp.topMargin = dp(7);'),
+              ('devHint.setGravity(Gravity.CENTER);', 'devHint.setGravity(Gravity.CENTER);\n        devHint.setVisibility(View.GONE);'),
+              ('                dp(54)\n        ));', '                dp(46)\n        ));')
+          ]
+          for old, new in replacements:
+              if s.count(old) != 1:
+                  raise SystemExit('auth layout anchor mismatch: ' + old[:50])
+              s = s.replace(old, new, 1)
+          p.write_text(s)
+          if 'DEV ВХОД' not in s:
+              raise SystemExit('DEV button missing after compact patch')
+          PY
+          grep -q 'DEV ВХОД' client/app/src/main/java/com/blackrussia/launcher/ui/VostokAuthDialog.java
+
       - name: Apply VOSTOK Android build compatibility
         working-directory: client
         run: |
           python3 - <<'PY'
           from pathlib import Path
           Path('build.gradle').write_text('''// VOSTOK CI build configuration\nbuildscript {\n    repositories {\n        mavenCentral()\n        google()\n        jcenter()\n    }\n    dependencies {\n        classpath 'com.android.tools.build:gradle:8.2.1'\n    }\n}\n\nallprojects {\n    repositories {\n        mavenCentral()\n        google()\n        jcenter()\n        maven { url "https://jitpack.io" }\n    }\n}\n\ntask clean(type: Delete) {\n    delete rootProject.buildDir\n}\n''')
-          Path('app/build.gradle').write_text('''apply plugin: 'com.android.application'\n\nandroid {\n    namespace "com.blackrussia.game"\n    compileSdkVersion 30\n\n    compileOptions {\n        sourceCompatibility 1.8\n        targetCompatibility 1.8\n    }\n\n    defaultConfig {\n        minSdkVersion 17\n        targetSdkVersion 28\n        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"\n        applicationId "com.vostok.roleplay"\n        versionName "vostok-dev-0.1.7"\n        versionCode 17\n        vectorDrawables.useSupportLibrary = true\n        multiDexEnabled = true\n        ndk { abiFilters 'armeabi-v7a' }\n    }\n}\n\ndependencies {\n    implementation fileTree(dir: "libs", include: ["*.jar"])\n    implementation 'androidx.appcompat:appcompat:1.1.0'\n    implementation 'com.google.android.material:material:1.0.0'\n    implementation 'com.tuyenmonkey:mkloader:1.4.0'\n    implementation group: 'org.ini4j', name: 'ini4j', version: '0.5.4'\n    implementation 'androidx.constraintlayout:constraintlayout:2.0.4'\n    implementation "com.github.skydoves:colorpickerpreference:2.0.4"\n    testImplementation 'junit:junit:4.12'\n    implementation 'com.github.Triggertrap:SeekArc:v1.1'\n    implementation 'com.akexorcist:round-corner-progress-bar:2.1.2'\n    implementation 'io.github.dinuscxj:circleprogressbar:1.4.1'\n    implementation 'com.makeramen:roundedimageview:2.3.0'\n    implementation 'com.github.bumptech.glide:glide:4.13.0'\n    annotationProcessor 'com.github.bumptech.glide:compiler:4.13.0'\n    implementation 'com.google.firebase:firebase-database:20.0.4'\n    implementation 'com.github.hzy3774:AndroidP7zip:v1.7.2'\n    implementation 'com.squareup.retrofit2:converter-gson:2.1.0'\n    implementation platform('com.google.firebase:firebase-bom:29.2.1')\n    implementation 'com.liulishuo.filedownloader:library:1.7.7'\n}\n''')
+          Path('app/build.gradle').write_text('''apply plugin: 'com.android.application'\n\nandroid {\n    namespace "com.blackrussia.game"\n    compileSdkVersion 30\n\n    compileOptions {\n        sourceCompatibility 1.8\n        targetCompatibility 1.8\n    }\n\n    defaultConfig {\n        minSdkVersion 17\n        targetSdkVersion 28\n        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"\n        applicationId "com.vostok.roleplay"\n        versionName "vostok-dev-0.1.8"\n        versionCode 18\n        vectorDrawables.useSupportLibrary = true\n        multiDexEnabled = true\n        ndk { abiFilters 'armeabi-v7a' }\n    }\n}\n\ndependencies {\n    implementation fileTree(dir: "libs", include: ["*.jar"])\n    implementation 'androidx.appcompat:appcompat:1.1.0'\n    implementation 'com.google.android.material:material:1.0.0'\n    implementation 'com.tuyenmonkey:mkloader:1.4.0'\n    implementation group: 'org.ini4j', name: 'ini4j', version: '0.5.4'\n    implementation 'androidx.constraintlayout:constraintlayout:2.0.4'\n    implementation "com.github.skydoves:colorpickerpreference:2.0.4"\n    testImplementation 'junit:junit:4.12'\n    implementation 'com.github.Triggertrap:SeekArc:v1.1'\n    implementation 'com.akexorcist:round-corner-progress-bar:2.1.2'\n    implementation 'io.github.dinuscxj:circleprogressbar:1.4.1'\n    implementation 'com.makeramen:roundedimageview:2.3.0'\n    implementation 'com.github.bumptech.glide:glide:4.13.0'\n    annotationProcessor 'com.github.bumptech.glide:compiler:4.13.0'\n    implementation 'com.google.firebase:firebase-database:20.0.4'\n    implementation 'com.github.hzy3774:AndroidP7zip:v1.7.2'\n    implementation 'com.squareup.retrofit2:converter-gson:2.1.0'\n    implementation platform('com.google.firebase:firebase-bom:29.2.1')\n    implementation 'com.liulishuo.filedownloader:library:1.7.7'\n}\n''')
           p=Path('gradle/wrapper/gradle-wrapper.properties')
           s=p.read_text()
           import re
@@ -121,6 +151,7 @@ jobs:
           grep -q "package: name='com.vostok.roleplay'" /tmp/vostok_badging.txt
           grep -q "application-label:'VOSTOK'" /tmp/vostok_badging.txt
           unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q 'vostok_launcher_reference.jpg'
+          grep -q 'DEV ВХОД' app/src/main/java/com/blackrussia/launcher/ui/VostokAuthDialog.java
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
