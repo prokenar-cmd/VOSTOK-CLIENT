@@ -1,6 +1,16 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import runpy
 import sys
+
+# Candidate 022 build hook. The workflow already invokes this validator after
+# apply_vostok_native_ui_bridge.py, so apply the focused native control patch
+# here without duplicating the large Android workflow. Keep this explicit until
+# the 022 device smoke test passes, then fold it into the canonical native patch.
+control_patch = Path(__file__).with_name("apply_vostok_control_fix_022.py")
+if not control_patch.is_file():
+    raise SystemExit("missing Candidate 022 control patch")
+runpy.run_path(str(control_patch), run_name="__main__")
 
 root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("client")
 java_root = root / "app/src/main/java/com/blackrussia/game/vostok/account"
