@@ -3,10 +3,12 @@ from pathlib import Path
 header = Path('client/Jni source/jni/util/CJavaWrapper.h')
 source = Path('client/Jni source/jni/util/CJavaWrapper.cpp')
 chat = Path('client/Jni source/jni/chatwindow.cpp')
+hooks = Path('client/Jni source/jni/game/hooks.cpp')
 
 h = header.read_text()
 cpp = source.read_text()
 chat_cpp = chat.read_text()
+hooks_cpp = hooks.read_text()
 
 header_replacements = [
     (
@@ -121,7 +123,220 @@ if 'dlopen("libbass.so", RTLD_NOW)' not in chat_cpp:
 if 'if (!BASS_Init_func)' not in chat_cpp:
     raise SystemExit('BASS_Init null guard missing')
 
+# Candidate 021 native fix #1: donor RLEDecompress_hook can copy a repeated
+# texture segment past pEndOfDest. Candidate 020 crashed in this exact memcpy
+# while TextureDatabaseRuntime::LoadFullTexture was streaming a vehicle texture.
+rle_start = 'uint8_t* RLEDecompress_hook(uint8_t* pDest, size_t uiDestSize, uint8_t const* pSrc, size_t uiSegSize, uint32_t uiEscape) {'
+rle_end = '\n\n#include "..//crashlytics.h"'
+rle_start_pos = hooks_cpp.find(rle_start)
+rle_end_pos = hooks_cpp.find(rle_end, rle_start_pos)
+if rle_start_pos == -1 or rle_end_pos == -1:
+    raise SystemExit('hooks.cpp RLEDecompress_hook anchors not found')
+
+safe_rle = r'''uint8_t* RLEDecompress_hook(uint8_t* pDest, size_t uiDestSize, uint8_t const* pSrc, size_t uiSegSize, uint32_t uiEscape) {
+    if (!pDest || !pSrc || uiDestSize == 0 || uiSegSize == 0)
+    {
+        dwRLEDecompressSourceSize = 0;
+        return pDest;
+    }
+
+    uint8_t* pTempDest = pDest;
+    const uint8_t* pTempSrc = pSrc;
+    uint8_t* pEndOfDest = pDest + uiDestSize;
+    const uint8_t* pEndOfSrc = pSrc + dwRLEDecompressSourceSize;
+
+    while (pTempDest < pEndOfDest && pTempSrc < pEndOfSrc)
+    {
+        if (*pTempSrc == uiEscape)
+        {
+            if ((size_t)(pEndOfSrc - pTempSrc) < 2)
+            {
+                Log("VOSTOK RLE guard: truncated run header srcRemain=%u", (unsigned)(pEndOfSrc - pTempSrc));
+                break;
+            }
+
+            uint8_t repeatCount = pTempSrc[1];
+            if ((size_t)(pEndOfSrc - pTempSrc) < 2 + uiSegSize)
+            {
+                Log("VOSTOK RLE guard: truncated run payload srcRemain=%u seg=%u",
+                    (unsigned)(pEndOfSrc - pTempSrc), (unsigned)uiSegSize);
+                break;
+            }
+
+            const uint8_t* pBlock = pTempSrc + 2;
+            for (uint8_t repeat = 0; repeat < repeatCount; ++repeat)
+            {
+                if ((size_t)(pEndOfDest - pTempDest) < uiSegSize)
+                {
+                    Log("VOSTOK RLE guard: repeat overflow destRemain=%u seg=%u repeat=%u/%u srcSize=%u",
+                        (unsigned)(pEndOfDest - pTempDest), (unsigned)uiSegSize,
+                        (unsigned)repeat, (unsigned)repeatCount,
+                        (unsigned)dwRLEDecompressSourceSize);
+                    dwRLEDecompressSourceSize = 0;
+                    return pDest;
+                }
+
+                pDest = (uint8_t*)memcpy(pTempDest, pBlock, uiSegSize);
+                pTempDest += uiSegSize;
+            }
+
+            pTempSrc += 2 + uiSegSize;
+        }
+        else
+        {
+            if ((size_t)(pEndOfSrc - pTempSrc) < uiSegSize ||
+                (size_t)(pEndOfDest - pTempDest) < uiSegSize)
+            {
+                Log("VOSTOK RLE guard: literal boundary srcRemain=%u destRemain=%u seg=%u",
+                    (unsigned)(pEndOfSrc - pTempSrc),
+                    (unsigned)(pEndOfDest - pTempDest),
+                    (unsigned)uiSegSize);
+                break;
+            }
+
+            pDest = (uint8_t*)memcpy(pTempDest, pTempSrc, uiSegSize);
+            pTempDest += uiSegSize;
+            pTempSrc += uiSegSize;
+        }
+    }
+
+    dwRLEDecompressSourceSize = 0;
+    return pDest;
+}'''
+
+hooks_cpp = hooks_cpp[:rle_start_pos] + safe_rle + hooks_cpp[rle_end_pos:]
+
+# Candidate 021 native fix #2: the donor renders the entire custom widget
+# manager only from CWidgetButtonEnterCar_Draw_hook. That makes VOSTOK/SAMP
+# buttons depend on GTA deciding to draw the enter-car control (usually after a
+# vehicle is streamed nearby). Move the custom widget update/draw to the regular
+# HUD pass so controls are present immediately after spawn.
+hud_anchor = 'void CHud__DrawScriptText_hook(uintptr_t thiz, uint8_t unk)\n{'
+if hooks_cpp.count(hud_anchor) != 1:
+    raise SystemExit('hooks.cpp CHud__DrawScriptText_hook anchor mismatch')
+hooks_cpp = hooks_cpp.replace(
+    hud_anchor,
+    'void DrawVostokWidgetsEveryFrame();\n\n' + hud_anchor,
+    1
+)
+
+hud_tail = '''\t\t}\n\t}\n}\n\n#include "..//keyboard.h"'''
+if hooks_cpp.count(hud_tail) != 1:
+    raise SystemExit('hooks.cpp CHud__DrawScriptText_hook tail mismatch')
+hooks_cpp = hooks_cpp.replace(
+    hud_tail,
+    '\t\t}\n\t}\n\n\tDrawVostokWidgetsEveryFrame();\n}\n\n#include "..//keyboard.h"',
+    1
+)
+
+enter_start = 'int CWidgetButtonEnterCar_Draw_hook(uintptr_t thiz)\n{'
+enter_end = '\n}\n\nuint64_t(*CWorld_ProcessPedsAfterPreRender)();'
+enter_start_pos = hooks_cpp.find(enter_start)
+enter_end_pos = hooks_cpp.find(enter_end, enter_start_pos)
+if enter_start_pos == -1 or enter_end_pos == -1:
+    raise SystemExit('hooks.cpp enter-car widget hook anchors not found')
+
+widget_impl = r'''void DrawVostokWidgetsEveryFrame()
+{
+    if (!g_pWidgetManager || !pGame)
+    {
+        return;
+    }
+
+    CWidget* pWidget = g_pWidgetManager->GetWidget(WIDGET_CHATHISTORY_UP);
+    if (pWidget)
+    {
+        pWidget->SetDrawState(false);
+    }
+
+    pWidget = g_pWidgetManager->GetWidget(WIDGET_CHATHISTORY_DOWN);
+    if (pWidget)
+    {
+        pWidget->SetDrawState(false);
+    }
+
+    pWidget = g_pWidgetManager->GetWidget(WIDGET_CAMERA_CYCLE);
+    if (pWidget)
+    {
+        pWidget->SetDrawState(true);
+    }
+
+    pWidget = g_pWidgetManager->GetWidget(WIDGET_MICROPHONE);
+    if (pWidget)
+    {
+        if (pVoice)
+        {
+            pWidget->SetDrawState(true);
+            static uint32_t lastTick = GetTickCount();
+            if (pWidget->GetState() == 2 && GetTickCount() - lastTick >= 250)
+            {
+                pVoice->TurnRecording();
+                if (pVoice->IsRecording())
+                {
+                    g_uiLastTickVoice = GetTickCount();
+                    if (pVoice->IsDisconnected())
+                    {
+                        pChatWindow->AddDebugMessage("Voice server disconnected");
+                        pVoice->DisableInput();
+                    }
+                }
+                lastTick = GetTickCount();
+            }
+
+            if (pVoice->IsRecording() && GetTickCount() - g_uiLastTickVoice >= 30000)
+            {
+                pVoice->DisableInput();
+            }
+
+            if (pVoice->IsRecording())
+            {
+                if (pVoice->IsDisconnected())
+                {
+                    pChatWindow->AddDebugMessage("Voice server disconnected");
+                    pVoice->DisableInput();
+                }
+                pWidget->SetColor(255, 0x9C, 0xCF, 0x9C);
+            }
+            else
+            {
+                pWidget->ResetColor();
+            }
+        }
+    }
+
+    if (!pGame->IsToggledHUDElement(HUD_ELEMENT_BUTTONS))
+    {
+        for (int i = 0; i < MAX_WIDGETS; i++)
+        {
+            CWidget* pAnyWidget = g_pWidgetManager->GetWidget(i);
+            if (pAnyWidget)
+            {
+                pAnyWidget->SetDrawState(false);
+            }
+        }
+    }
+
+    g_pWidgetManager->Draw();
+}
+
+int CWidgetButtonEnterCar_Draw_hook(uintptr_t thiz)
+{
+    return CWidgetButtonEnterCar_Draw(thiz);
+}'''
+
+hooks_cpp = hooks_cpp[:enter_start_pos] + widget_impl + hooks_cpp[enter_end_pos + 2:]
+
+for required in [
+    'VOSTOK RLE guard: repeat overflow',
+    'void DrawVostokWidgetsEveryFrame()',
+    '\tDrawVostokWidgetsEveryFrame();',
+    'return CWidgetButtonEnterCar_Draw(thiz);',
+]:
+    if required not in hooks_cpp:
+        raise SystemExit(f'Candidate 021 native patch validation failed: {required}')
+
 header.write_text(h)
 source.write_text(cpp)
 chat.write_text(chat_cpp)
-print('Applied VOSTOK native Interaction UI bridge + package-safe BASS loader')
+hooks.write_text(hooks_cpp)
+print('Applied VOSTOK native Interaction UI bridge + BASS loader + RLE bounds + HUD widget decoupling')
