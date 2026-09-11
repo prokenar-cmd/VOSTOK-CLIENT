@@ -14,7 +14,7 @@ old = '''void CChatWindow::AddClientMessage(uint32_t dwColor, char* szStr)
 \tAddToChatWindowBuffer(CHAT_TYPE_INFO, szStr, nullptr, dwColor, 0);
 }'''
 
-new = r'''void CChatWindow::AddClientMessage(uint32_t dwColor, char* szStr)
+new = '''void CChatWindow::AddClientMessage(uint32_t dwColor, char* szStr)
 {
     static const char kVostokInteractionShow[] = "~VOSTOK_UI~INTERACT:SHOW:";
     static const char kVostokInteractionHide[] = "~VOSTOK_UI~INTERACT:HIDE";
@@ -40,8 +40,8 @@ new = r'''void CChatWindow::AddClientMessage(uint32_t dwColor, char* szStr)
         return;
     }
 
-\tFilterInvalidChars(szStr);
-\tAddToChatWindowBuffer(CHAT_TYPE_INFO, szStr, nullptr, dwColor, 0);
+    FilterInvalidChars(szStr);
+    AddToChatWindowBuffer(CHAT_TYPE_INFO, szStr, nullptr, dwColor, 0);
 }'''
 
 count = s.count(old)
