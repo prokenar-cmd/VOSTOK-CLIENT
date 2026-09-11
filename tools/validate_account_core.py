@@ -12,6 +12,14 @@ if not control_patch.is_file():
     raise SystemExit("missing Candidate 022 control patch")
 runpy.run_path(str(control_patch), run_name="__main__")
 
+# Candidate 023: add only the narrow server->native Interaction button transport.
+# This deliberately runs after the 022 control fix and does not touch launcher,
+# splash/loading screens, HUD layout, auth UI, or gameplay controls.
+interaction_patch = Path(__file__).with_name("apply_vostok_interaction_button_023.py")
+if not interaction_patch.is_file():
+    raise SystemExit("missing Candidate 023 interaction button patch")
+runpy.run_path(str(interaction_patch), run_name="__main__")
+
 root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("client")
 java_root = root / "app/src/main/java/com/blackrussia/game/vostok/account"
 required = [
