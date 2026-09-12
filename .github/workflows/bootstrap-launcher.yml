@@ -1,5 +1,6 @@
 name: Bootstrap Frozen VOSTOK Launcher
 
+# Triggered to restore and permanently freeze the accepted Candidate 022 launcher binary.
 on:
   workflow_dispatch:
   push:
