@@ -1,0 +1,12 @@
+{
+  "launcher_lock_version": 1,
+  "state": "FROZEN",
+  "approved_from": "Candidate 020 / preserved in Candidate 022",
+  "approved_background_filename": "VOSTOK_LAUNCHER_BACKGROUND_CLEAN_019.jpg",
+  "approved_background_sha256": "8ede863d84340efc989af2fa35040d8df566c90e9c96fe7c2fede8aa8c6406e0",
+  "approved_background_width": 1891,
+  "approved_background_height": 831,
+  "launcher_view_overlay_git_blob": "843d63d840b5b4a3216caaaf788d3eef99dae5ac",
+  "launcher_resource_name": "vostok_launcher_reference",
+  "policy": "No normal candidate may change launcher art or VostokLauncherView. A launcher change requires an explicit launcher-only candidate, updated lock values, build verification and device approval."
+}
