@@ -2,7 +2,8 @@
 from pathlib import Path
 
 # Candidate 024 is deliberately a narrow presentation/localization pass.
-# It does not touch speedometer code, vehicle controls or account transport.
+# It does not touch the speedometer, vehicle controls, account transport,
+# or the frozen VOSTOK launcher main screen.
 
 
 def replace_once(path: Path, old: str, new: str, label: str) -> None:
@@ -33,10 +34,6 @@ replacements = [
 for old, new, label in replacements:
     replace_once(interaction, old, new, label)
 
-launcher = Path("client/app/src/main/java/com/blackrussia/launcher/ui/VostokLauncherView.java")
-replace_once(launcher, '"ID: "+c.id+"   •   LVL "+c.level',
-             '"ID: "+c.id+"   •   УР. "+c.level', "launcher level label")
-
 main = Path("client/app/src/main/java/com/blackrussia/launcher/activity/MainActivity.java")
 for old, new, label in [
     ('"Backend вернул неполную сессию"', '"Сервер учётных записей вернул неполную сессию"', "account session message"),
@@ -58,4 +55,4 @@ for needle in required:
     if needle not in text:
         raise SystemExit(f"Candidate 024 interaction UI verification failed: {needle}")
 
-print("Applied VOSTOK Candidate 024 Russian UI / compact interaction patch")
+print("Applied VOSTOK Candidate 024 Russian UI / compact interaction patch (launcher untouched)")
