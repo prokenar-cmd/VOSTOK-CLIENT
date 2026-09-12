@@ -34,8 +34,9 @@ jobs:
           python3 tools/apply_vostok_native_ui_bridge.py
           python3 tools/validate_account_core.py client
           python3 tools/apply_vostok_candidate_024.py
+          python3 tools/apply_vostok_candidate_026.py
 
-      - name: Fix launcher coordinate space and keep approved VOSTOK art
+      - name: Restore approved VOSTOK launcher through stable JPEG codec
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -52,12 +53,20 @@ jobs:
               s = s.replace(old, new, 1)
           p.write_text(s)
           PY
+          APPROVED_ART='overlay/app/src/main/res/drawable-nodpi/vostok_launcher_reference.webp'
+          test -f "$APPROVED_ART"
+          test "$(git hash-object "$APPROVED_ART")" = '0f05e637890ab06db40f5bdc09ad2de1fdf23f63'
           test -f client/app/src/main/res/drawable-nodpi/vostok_launcher_reference.webp
-          file client/app/src/main/res/drawable-nodpi/vostok_launcher_reference.webp
+          sudo apt-get update -qq
+          sudo apt-get install -y imagemagick
+          convert client/app/src/main/res/drawable-nodpi/vostok_launcher_reference.webp -resize 1891x831\! -quality 94 client/app/src/main/res/drawable-nodpi/vostok_launcher_reference.jpg
+          rm -f client/app/src/main/res/drawable-nodpi/vostok_launcher_reference.webp
+          test "$(identify -format '%wx%h' client/app/src/main/res/drawable-nodpi/vostok_launcher_reference.jpg)" = '1891x831'
+          test ! -f client/app/src/main/res/drawable-nodpi/vostok_launcher_reference.webp
           grep -q 'DESIGN_WIDTH = 1891.0f' client/app/src/main/java/com/blackrussia/launcher/ui/VostokLauncherView.java
           grep -q 'УР.' client/app/src/main/java/com/blackrussia/launcher/ui/VostokLauncherView.java
 
-      - name: Verify adaptive VOSTOK launcher UI
+      - name: Verify VOSTOK launcher and Russian UI guards
         run: |
           grep -q 'DEV ВХОД' client/app/src/main/java/com/blackrussia/launcher/ui/VostokAuthDialog.java
           grep -q 'REFERENCE_HEIGHT = 720.0f' client/app/src/main/java/com/blackrussia/launcher/ui/VostokAuthDialog.java
@@ -68,6 +77,11 @@ jobs:
           grep -q 'dp(70), dp(70)' client/app/src/main/java/com/blackrussia/game/vostok/ui/InteractionUiManager.java
           grep -q 'labelView.setTextSize(12.0f)' client/app/src/main/java/com/blackrussia/game/vostok/ui/InteractionUiManager.java
           grep -q 'Проверяем учётную запись VOSTOK' client/app/src/main/java/com/blackrussia/launcher/activity/MainActivity.java
+          grep -q 'VOSTOK RP' 'client/Jni source/jni/CLocalisation.cpp'
+          ! grep -q 'BLACK RUSSIA' 'client/Jni source/jni/CLocalisation.cpp'
+          ! grep -q 'BLACK MOSCOW' 'client/Jni source/jni/CLocalisation.cpp'
+          ! grep -q 'CLocalisation::Initialise("ru.lc")' 'client/Jni source/jni/main.cpp'
+          ! grep -q 'Connected to ' 'client/Jni source/jni/net/netrpc.cpp'
 
       - name: Apply VOSTOK Android build compatibility
         working-directory: client
@@ -75,7 +89,7 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           Path('build.gradle').write_text('''// VOSTOK CI build configuration\nbuildscript {\n    repositories {\n        mavenCentral()\n        google()\n        jcenter()\n    }\n    dependencies {\n        classpath 'com.android.tools.build:gradle:8.2.1'\n    }\n}\n\nallprojects {\n    repositories {\n        mavenCentral()\n        google()\n        jcenter()\n        maven { url "https://jitpack.io" }\n    }\n}\n\ntask clean(type: Delete) {\n    delete rootProject.buildDir\n}\n''')
-          Path('app/build.gradle').write_text('''apply plugin: 'com.android.application'\n\nandroid {\n    namespace "com.blackrussia.game"\n    compileSdkVersion 30\n\n    compileOptions {\n        sourceCompatibility 1.8\n        targetCompatibility 1.8\n    }\n\n    defaultConfig {\n        minSdkVersion 17\n        targetSdkVersion 28\n        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"\n        applicationId "com.vostok.roleplay"\n        versionName "vostok-dev-0.2.4"\n        versionCode 24\n        vectorDrawables.useSupportLibrary = true\n        multiDexEnabled = true\n        ndk { abiFilters 'armeabi-v7a' }\n    }\n}\n\ndependencies {\n    implementation fileTree(dir: "libs", include: ["*.jar"])\n    implementation 'androidx.appcompat:appcompat:1.1.0'\n    implementation 'com.google.android.material:material:1.0.0'\n    implementation 'com.tuyenmonkey:mkloader:1.4.0'\n    implementation group: 'org.ini4j', name: 'ini4j', version: '0.5.4'\n    implementation 'androidx.constraintlayout:constraintlayout:2.0.4'\n    implementation "com.github.skydoves:colorpickerpreference:2.0.4"\n    testImplementation 'junit:junit:4.12'\n    implementation 'com.github.Triggertrap:SeekArc:v1.1'\n    implementation 'com.akexorcist:round-corner-progress-bar:2.1.2'\n    implementation 'io.github.dinuscxj:circleprogressbar:1.4.1'\n    implementation 'com.makeramen:roundedimageview:2.3.0'\n    implementation 'com.github.bumptech.glide:glide:4.13.0'\n    annotationProcessor 'com.github.bumptech.glide:compiler:4.13.0'\n    implementation 'com.google.firebase:firebase-database:20.0.4'\n    implementation 'com.github.hzy3774:AndroidP7zip:v1.7.2'\n    implementation 'com.squareup.retrofit2:converter-gson:2.1.0'\n    implementation platform('com.google.firebase:firebase-bom:29.2.1')\n    implementation 'com.liulishuo.filedownloader:library:1.7.7'\n}\n''')
+          Path('app/build.gradle').write_text('''apply plugin: 'com.android.application'\n\nandroid {\n    namespace "com.blackrussia.game"\n    compileSdkVersion 30\n\n    compileOptions {\n        sourceCompatibility 1.8\n        targetCompatibility 1.8\n    }\n\n    defaultConfig {\n        minSdkVersion 17\n        targetSdkVersion 28\n        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"\n        applicationId "com.vostok.roleplay"\n        versionName "vostok-dev-0.2.6"\n        versionCode 26\n        vectorDrawables.useSupportLibrary = true\n        multiDexEnabled = true\n        ndk { abiFilters 'armeabi-v7a' }\n    }\n}\n\ndependencies {\n    implementation fileTree(dir: "libs", include: ["*.jar"])\n    implementation 'androidx.appcompat:appcompat:1.1.0'\n    implementation 'com.google.android.material:material:1.0.0'\n    implementation 'com.tuyenmonkey:mkloader:1.4.0'\n    implementation group: 'org.ini4j', name: 'ini4j', version: '0.5.4'\n    implementation 'androidx.constraintlayout:constraintlayout:2.0.4'\n    implementation "com.github.skydoves:colorpickerpreference:2.0.4"\n    testImplementation 'junit:junit:4.12'\n    implementation 'com.github.Triggertrap:SeekArc:v1.1'\n    implementation 'com.akexorcist:round-corner-progress-bar:2.1.2'\n    implementation 'io.github.dinuscxj:circleprogressbar:1.4.1'\n    implementation 'com.makeramen:roundedimageview:2.3.0'\n    implementation 'com.github.bumptech.glide:glide:4.13.0'\n    annotationProcessor 'com.github.bumptech.glide:compiler:4.13.0'\n    implementation 'com.google.firebase:firebase-database:20.0.4'\n    implementation 'com.github.hzy3774:AndroidP7zip:v1.7.2'\n    implementation 'com.squareup.retrofit2:converter-gson:2.1.0'\n    implementation platform('com.google.firebase:firebase-bom:29.2.1')\n    implementation 'com.liulishuo.filedownloader:library:1.7.7'\n}\n''')
           p=Path('gradle/wrapper/gradle-wrapper.properties')
           s=p.read_text()
           import re
@@ -90,8 +104,6 @@ jobs:
           from pathlib import Path
           p=Path('Jni source/jni/util/CJavaWrapper.cpp')
           p.write_text(p.read_text().replace('141.95.190.142', '192.168.0.22').replace('1187', '7777'))
-          p=Path('Jni source/jni/net/netrpc.cpp')
-          p.write_text(p.read_text().replace('Connected to {B9C9BF}%.64s', 'Connected to VOSTOK DEV {B9C9BF}%.64s'))
           p=Path('Jni source/jni/Android.mk')
           p.write_text(p.read_text().replace('/vendor/RakNet/', '/vendor/raknet/'))
           PY
@@ -134,7 +146,8 @@ jobs:
           "$AAPT" dump badging app/build/outputs/apk/debug/app-debug.apk | tee /tmp/vostok_badging.txt
           grep -q "package: name='com.vostok.roleplay'" /tmp/vostok_badging.txt
           grep -q "application-label:'VOSTOK'" /tmp/vostok_badging.txt
-          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q 'vostok_launcher_reference.webp'
+          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q 'vostok_launcher_reference.jpg'
+          ! unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q 'vostok_launcher_reference.webp'
           grep -q 'DEV ВХОД' app/src/main/java/com/blackrussia/launcher/ui/VostokAuthDialog.java
 
       - name: Upload APK
