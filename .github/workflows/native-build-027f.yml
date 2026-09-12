@@ -1,0 +1,69 @@
+name: VOSTOK Native Candidate 027F
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/native-build-027f.yml'
+      - 'tools/apply_vostok_candidate_027f.py'
+  workflow_dispatch:
+
+jobs:
+  build-native:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 35
+    steps:
+      - name: Checkout VOSTOK orchestration
+        uses: actions/checkout@v5
+
+      - name: Fetch pinned Parad1st client source
+        run: |
+          git clone https://github.com/Parad1st/Black-Russia-Source.git client
+          cd client
+          git checkout b7574b3ad246f31a15d15a28075936dd62e65fad
+          test "$(git rev-parse HEAD)" = "b7574b3ad246f31a15d15a28075936dd62e65fad"
+
+      - name: Apply confirmed VOSTOK native lineage
+        run: |
+          python3 tools/apply_vostok_native_ui_bridge.py
+          python3 tools/apply_vostok_control_fix_022.py
+          python3 tools/apply_vostok_interaction_button_023.py
+          python3 tools/apply_vostok_candidate_026.py
+          python3 tools/apply_vostok_candidate_027f.py
+          grep -q '~VOSTOK_UI~INTERACT:SHOW:NPC:' 'client/Jni source/jni/chatwindow.cpp'
+          ! grep -q '"~VOSTOK_UI~INTERACT:SHOW:"' 'client/Jni source/jni/chatwindow.cpp'
+
+      - name: Apply VOSTOK endpoint and native compatibility
+        working-directory: client
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('Jni source/jni/util/CJavaWrapper.cpp')
+          p.write_text(p.read_text().replace('141.95.190.142', '192.168.0.22').replace('1187', '7777'))
+          p=Path('Jni source/jni/Android.mk')
+          p.write_text(p.read_text().replace('/vendor/RakNet/', '/vendor/raknet/'))
+          PY
+          ln -sf chatwindow.h "Jni source/jni/chatWindow.h"
+
+      - name: Install legacy NDK r16b compatibility
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libncurses5 libtinfo5
+          curl -L --fail --retry 3 -o /tmp/ndk.zip https://dl.google.com/android/repository/android-ndk-r16b-linux-x86_64.zip
+          unzip -q /tmp/ndk.zip -d $HOME
+          echo "NDK16=$HOME/android-ndk-r16b" >> $GITHUB_ENV
+
+      - name: Build Candidate 027F libsamp.so
+        working-directory: client/Jni source
+        run: |
+          rm -rf obj libs
+          "$NDK16/ndk-build" -j2 NDK_PROJECT_PATH=. APP_BUILD_SCRIPT=jni/Android.mk NDK_APPLICATION_MK=jni/Application.mk
+          test -f libs/armeabi-v7a/libsamp.so
+          sha256sum libs/armeabi-v7a/libsamp.so | tee /tmp/libsamp.sha256
+
+      - name: Upload Candidate 027F libsamp
+        uses: actions/upload-artifact@v4
+        with:
+          name: VOSTOK-027F-libsamp-armeabi-v7a
+          path: client/Jni source/libs/armeabi-v7a/libsamp.so
+          if-no-files-found: error
