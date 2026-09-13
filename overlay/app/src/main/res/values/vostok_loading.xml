@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      VOSTOK loading text is deliberately data-driven. These strings are UI,
+      not baked into the background artwork, so they can be edited without
+      replacing the loading image or touching native code.
+    -->
+    <string name="vostok_loading_status_start">Запускаем игровой клиент...</string>
+    <string name="vostok_loading_status_world">Подготавливаем игровой мир...</string>
+    <string name="vostok_loading_status_resources">Загружаем игровые ресурсы...</string>
+    <string name="vostok_loading_status_sync">Синхронизируем данные VOSTOK...</string>
+    <string name="vostok_loading_status_finish">Завершаем загрузку...</string>
+    <string name="vostok_loading_status_enter">Входим в игровой мир...</string>
+
+    <!-- Edit this one array later to change/extend loading tips. -->
+    <string-array name="vostok_loading_tips">
+        <item>Исследуйте город: многие действия открываются через кнопку «Взаимодействие».</item>
+        <item>Курьерскую смену можно завершить у диспетчера или через меню работы.</item>
+        <item>Личный автомобиль после выхода возвращается на виртуальную парковку.</item>
+        <item>Следите за топливом и состоянием автомобиля — их можно восстановить на АЗС и СТО.</item>
+        <item>У одного персонажа одновременно может быть только один бизнес.</item>
+        <item>Новые работы и возможности открываются по мере развития персонажа.</item>
+        <item>Прогресс работы и прогресс персонажа — это разные системы развития.</item>
+        <item>Не закрывайте игру во время первого запуска и подготовки игровых ресурсов.</item>
+    </string-array>
+</resources>
