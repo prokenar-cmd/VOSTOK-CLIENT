@@ -11,12 +11,13 @@ import java.util.List;
 /**
  * Single Java-side UI bridge for VOSTOK gameplay overlays.
  *
- * Native/JNI-facing methods remain on NvEventQueueActivity for binary compatibility;
- * gameplay overlays are owned here so HUD, notifications, interaction, objectives and
- * future job UI do not grow separate parallel bridges.
+ * Native/JNI-facing methods remain on NvEventQueueActivity for binary compatibility.
+ * 031B adds VostokUiManager as the common screen/input/safe-area owner while
+ * preserving the confirmed legacy HUD and Interaction implementation unchanged.
  */
 public final class VostokUiBridge {
     private final Activity activity;
+    private final VostokUiManager uiManager;
     private final HudManager hudManager;
     private final Notification notificationManager;
     private final InteractionUiManager interactionManager;
@@ -27,6 +28,10 @@ public final class VostokUiBridge {
     public VostokUiBridge(Activity activity, Runnable interactionAction) {
         this.activity = activity;
         this.legacyNpcInteractionAction = interactionAction;
+        uiManager = new VostokUiManager(activity);
+
+        // Do not migrate these working surfaces in 031B. Their VOSTOK replacements
+        // will be enabled one at a time after their own device promotion gates.
         hudManager = new HudManager(activity);
         notificationManager = new Notification(activity);
         interactionManager = new InteractionUiManager(activity, this::onInteractionPressed);
@@ -58,8 +63,36 @@ public final class VostokUiBridge {
                         legacyNpcInteractionAction.run();
                     }
                 },
-                null // Visual radial menu will plug in here later without replacing InteractionCore.
+                null // Visual radial menu plugs into VostokUiManager in its own candidate.
         );
+    }
+
+    public VostokUiManager getUiManager() {
+        return uiManager;
+    }
+
+    public boolean onBackPressed() {
+        return !destroyed && uiManager.handleBack();
+    }
+
+    public boolean shouldBlockGameInput() {
+        return !destroyed && uiManager.shouldBlockGameInput();
+    }
+
+    /**
+     * Stable future native/server entry point. It is harmless until a concrete
+     * screen controller is registered for the supplied wire id.
+     */
+    public void showUiScreen(int wireId) {
+        runOnUiThread(() -> uiManager.openScreen(wireId));
+    }
+
+    public void hideUiScreen(int wireId) {
+        runOnUiThread(() -> uiManager.closeScreen(wireId));
+    }
+
+    public void closeAllTransientUi() {
+        runOnUiThread(uiManager::closeAllTransient);
     }
 
     public void updateHudInfo(int health, int armour, int hunger, int weaponId, int ammo,
@@ -147,6 +180,7 @@ public final class VostokUiBridge {
             notificationManager.Shutdown();
             interactionCore.shutdown();
             interactionManager.shutdown();
+            uiManager.shutdown();
         };
         if (Looper.myLooper() == Looper.getMainLooper()) {
             cleanup.run();
