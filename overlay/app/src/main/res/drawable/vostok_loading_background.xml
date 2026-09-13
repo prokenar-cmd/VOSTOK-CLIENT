@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!--
+      031A clean fallback art. This resource contains no baked loading bar,
+      percentage, tip or spinner. A final cinematic raster can replace this
+      single resource later without changing VostokLoadingOverlay/state code.
+    -->
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:angle="0"
+                android:startColor="#0B0908"
+                android:centerColor="#1B120E"
+                android:endColor="#09090B" />
+        </shape>
+    </item>
+    <item android:left="0dp" android:right="0dp" android:top="0dp" android:bottom="0dp">
+        <shape android:shape="rectangle">
+            <gradient
+                android:angle="315"
+                android:startColor="#00FF6B2C"
+                android:centerColor="#18FF6B2C"
+                android:endColor="#003A1F16" />
+        </shape>
+    </item>
+</layer-list>
