@@ -11,9 +11,10 @@ public final class VostokUiFeatureFlags {
     public static final boolean UI_CORE_ENABLED = true;
     public static final boolean VOSTOK_INTERACTION_ENABLED = true;
 
-    // 031D device-test candidate surfaces.
+    // 031D/031E device-test candidate surfaces.
     public static final boolean VOSTOK_HUD_ENABLED = true;
     public static final boolean VOSTOK_SPEEDOMETER_ENABLED = true;
+    public static final boolean VOSTOK_VEHICLE_UI_ENABLED = true;
 
     // Later candidates.
     public static final boolean VOSTOK_RADIAL_ENABLED = false;
