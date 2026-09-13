@@ -30,11 +30,19 @@ jobs:
         run: |
           cp -a overlay/. client/
           rm -f client/app/src/main/java/com/blackrussia/launcher/other/UnZipCallback.java
+
+          # Preserve the complete confirmed client lineage before 031A.
           python3 tools/apply_vostok_ui_foundation.py
           python3 tools/apply_vostok_native_ui_bridge.py
+          python3 tools/apply_vostok_control_fix_022.py
+          python3 tools/apply_vostok_interaction_button_023.py
           python3 tools/validate_account_core.py client
           python3 tools/apply_vostok_candidate_024.py
           python3 tools/apply_vostok_candidate_026.py
+          python3 tools/apply_vostok_candidate_027f.py
+
+          # Candidate 031A: live VOSTOK loading, no server chooser, entry routing hooks.
+          python3 tools/apply_vostok_candidate_031a.py
 
       - name: Install frozen VOSTOK launcher
         run: |
@@ -43,16 +51,38 @@ jobs:
           python3 tools/launcher_lock.py install
           python3 tools/launcher_lock.py snapshot
 
-      - name: Verify VOSTOK Russian UI guards
+      - name: Verify VOSTOK 031A guards
         run: |
+          # Frozen launcher/auth remains present.
           grep -q 'DEV ВХОД' client/app/src/main/java/com/blackrussia/launcher/ui/VostokAuthDialog.java
           grep -q 'REFERENCE_HEIGHT = 720.0f' client/app/src/main/java/com/blackrussia/launcher/ui/VostokAuthDialog.java
           grep -q 'private int px(int value)' client/app/src/main/java/com/blackrussia/launcher/ui/VostokAuthDialog.java
           grep -q 'android:text="VOSTOK"' client/app/src/main/res/layout/activity_splash.xml
           grep -q 'vostok_app_icon' client/app/src/main/res/drawable/splash.xml
           grep -q '#FF6B2C' client/app/src/main/res/drawable/vostok_app_icon.xml
+
+          # Existing interaction/native fixes remain in the same full APK build.
           grep -q 'dp(70), dp(70)' client/app/src/main/java/com/blackrussia/game/vostok/ui/InteractionUiManager.java
           grep -q 'labelView.setTextSize(12.0f)' client/app/src/main/java/com/blackrussia/game/vostok/ui/InteractionUiManager.java
+          grep -q '~VOSTOK_UI~INTERACT:SHOW:NPC:' 'client/Jni source/jni/chatwindow.cpp'
+          ! grep -q '"~VOSTOK_UI~INTERACT:SHOW:"' 'client/Jni source/jni/chatwindow.cpp'
+          grep -q 'VOSTOK CONTROL: camera-behind restore widgets=' 'client/Jni source/jni/net/scriptrpc.cpp'
+
+          # 031A loading is live UI: editable strings + custom bar, no ChooseServer route.
+          grep -q 'class VostokLoadingOverlay' client/app/src/main/java/com/blackrussia/game/vostok/loading/VostokLoadingOverlay.java
+          grep -q 'vostok_loading_tips' client/app/src/main/res/values/vostok_loading.xml
+          grep -q 'mVostokLoading.update(percent)' client/app/src/main/java/com/nvidia/devtech/NvEventQueueActivity.java
+          grep -q 'mVostokLoading.show()' client/app/src/main/java/com/nvidia/devtech/NvEventQueueActivity.java
+          ! grep -q 'mChooseServer' client/app/src/main/java/com/nvidia/devtech/NvEventQueueActivity.java
+          ! grep -q 'import com.blackrussia.game.gui.ChooseServer' client/app/src/main/java/com/nvidia/devtech/NvEventQueueActivity.java
+          ! grep -q 'IndeterminateCenteredRoundCornerProgressBar' client/app/src/main/java/com/blackrussia/game/vostok/loading/VostokLoadingOverlay.java
+
+          # 031A entry contract prepares future Character Creator / Spawn Selection.
+          grep -q 'VostokEntryRouter.resolve' client/app/src/main/java/com/blackrussia/launcher/activity/MainActivity.java
+          grep -q 'CHARACTER_CREATION' client/app/src/main/java/com/blackrussia/launcher/entry/VostokEntryRouter.java
+          grep -q 'SPAWN_SELECTION' client/app/src/main/java/com/blackrussia/launcher/entry/VostokEntryRouter.java
+
+          # Existing Russian/debranding guards.
           grep -q 'Проверяем учётную запись VOSTOK' client/app/src/main/java/com/blackrussia/launcher/activity/MainActivity.java
           grep -q 'VOSTOK RP' 'client/Jni source/jni/CLocalisation.cpp'
           ! grep -q 'BLACK RUSSIA' 'client/Jni source/jni/CLocalisation.cpp'
@@ -66,7 +96,7 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           Path('build.gradle').write_text('''// VOSTOK CI build configuration\nbuildscript {\n    repositories {\n        mavenCentral()\n        google()\n        jcenter()\n    }\n    dependencies {\n        classpath 'com.android.tools.build:gradle:8.2.1'\n    }\n}\n\nallprojects {\n    repositories {\n        mavenCentral()\n        google()\n        jcenter()\n        maven { url "https://jitpack.io" }\n    }\n}\n\ntask clean(type: Delete) {\n    delete rootProject.buildDir\n}\n''')
-          Path('app/build.gradle').write_text('''apply plugin: 'com.android.application'\n\nandroid {\n    namespace "com.blackrussia.game"\n    compileSdkVersion 30\n\n    compileOptions {\n        sourceCompatibility 1.8\n        targetCompatibility 1.8\n    }\n\n    defaultConfig {\n        minSdkVersion 17\n        targetSdkVersion 28\n        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"\n        applicationId "com.vostok.roleplay"\n        versionName "vostok-dev-0.2.6"\n        versionCode 26\n        vectorDrawables.useSupportLibrary = true\n        multiDexEnabled = true\n        ndk { abiFilters 'armeabi-v7a' }\n    }\n}\n\ndependencies {\n    implementation fileTree(dir: "libs", include: ["*.jar"])\n    implementation 'androidx.appcompat:appcompat:1.1.0'\n    implementation 'com.google.android.material:material:1.0.0'\n    implementation 'com.tuyenmonkey:mkloader:1.4.0'\n    implementation group: 'org.ini4j', name: 'ini4j', version: '0.5.4'\n    implementation 'androidx.constraintlayout:constraintlayout:2.0.4'\n    implementation "com.github.skydoves:colorpickerpreference:2.0.4"\n    testImplementation 'junit:junit:4.12'\n    implementation 'com.github.Triggertrap:SeekArc:v1.1'\n    implementation 'com.akexorcist:round-corner-progress-bar:2.1.2'\n    implementation 'io.github.dinuscxj:circleprogressbar:1.4.1'\n    implementation 'com.makeramen:roundedimageview:2.3.0'\n    implementation 'com.github.bumptech.glide:glide:4.13.0'\n    annotationProcessor 'com.github.bumptech.glide:compiler:4.13.0'\n    implementation 'com.google.firebase:firebase-database:20.0.4'\n    implementation 'com.github.hzy3774:AndroidP7zip:v1.7.2'\n    implementation 'com.squareup.retrofit2:converter-gson:2.1.0'\n    implementation platform('com.google.firebase:firebase-bom:29.2.1')\n    implementation 'com.liulishuo.filedownloader:library:1.7.7'\n}\n''')
+          Path('app/build.gradle').write_text('''apply plugin: 'com.android.application'\n\nandroid {\n    namespace "com.blackrussia.game"\n    compileSdkVersion 30\n\n    compileOptions {\n        sourceCompatibility 1.8\n        targetCompatibility 1.8\n    }\n\n    defaultConfig {\n        minSdkVersion 17\n        targetSdkVersion 28\n        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"\n        applicationId "com.vostok.roleplay"\n        versionName "vostok-dev-0.3.1"\n        versionCode 31\n        vectorDrawables.useSupportLibrary = true\n        multiDexEnabled = true\n        ndk { abiFilters 'armeabi-v7a' }\n    }\n}\n\ndependencies {\n    implementation fileTree(dir: "libs", include: ["*.jar"])\n    implementation 'androidx.appcompat:appcompat:1.1.0'\n    implementation 'com.google.android.material:material:1.0.0'\n    implementation 'com.tuyenmonkey:mkloader:1.4.0'\n    implementation group: 'org.ini4j', name: 'ini4j', version: '0.5.4'\n    implementation 'androidx.constraintlayout:constraintlayout:2.0.4'\n    implementation "com.github.skydoves:colorpickerpreference:2.0.4"\n    testImplementation 'junit:junit:4.12'\n    implementation 'com.github.Triggertrap:SeekArc:v1.1'\n    implementation 'com.akexorcist:round-corner-progress-bar:2.1.2'\n    implementation 'io.github.dinuscxj:circleprogressbar:1.4.1'\n    implementation 'com.makeramen:roundedimageview:2.3.0'\n    implementation 'com.github.bumptech.glide:glide:4.13.0'\n    annotationProcessor 'com.github.bumptech.glide:compiler:4.13.0'\n    implementation 'com.google.firebase:firebase-database:20.0.4'\n    implementation 'com.github.hzy3774:AndroidP7zip:v1.7.2'\n    implementation 'com.squareup.retrofit2:converter-gson:2.1.0'\n    implementation platform('com.google.firebase:firebase-bom:29.2.1')\n    implementation 'com.liulishuo.filedownloader:library:1.7.7'\n}\n''')
           p=Path('gradle/wrapper/gradle-wrapper.properties')
           s=p.read_text()
           import re
@@ -132,13 +162,13 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: VOSTOK-client-debug
+          name: VOSTOK-client-031A-debug
           path: client/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
       - name: Upload source-built libsamp
         uses: actions/upload-artifact@v4
         with:
-          name: VOSTOK-libsamp-armeabi-v7a
+          name: VOSTOK-031A-libsamp-armeabi-v7a
           path: client/Jni source/libs/armeabi-v7a/libsamp.so
           if-no-files-found: error
