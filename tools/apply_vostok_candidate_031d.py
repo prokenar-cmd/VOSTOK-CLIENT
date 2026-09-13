@@ -22,11 +22,8 @@ def add_import(text: str, import_line: str) -> str:
     return text[:m.end()] + "\n" + import_line + "\n" + text[m.end():]
 
 
-# ---------------------------------------------------------------------------
-# Legacy HUD visual suppression. Do not delete donor HUD: radar/chat/weapon and
-# native callbacks stay intact. Replaced quick-access widgets must never be
-# re-shown after opening/closing chat keyboard.
-# ---------------------------------------------------------------------------
+# Keep donor HUD alive for radar/chat/weapon/native callbacks, but prevent the
+# replaced quick-access widgets from returning after the chat keyboard closes.
 hud = unique_java("HudManager.java")
 hud_text = hud.read_text(encoding="utf-8")
 for field in ("hud_menu", "hud_yved", "hud_quest", "hud_donate"):
@@ -37,10 +34,8 @@ for field in ("hud_menu", "hud_yved", "hud_quest", "hud_donate"):
 hud.write_text(hud_text, encoding="utf-8")
 
 
-# ---------------------------------------------------------------------------
-# Vehicle telemetry: use the donor's real authoritative values, replace only
-# the old speedometer visual. Native driving controls remain untouched.
-# ---------------------------------------------------------------------------
+# Vehicle telemetry: consume donor's real values and replace only the visual
+# speedometer. Native driving controls remain untouched.
 speed = unique_java("Speedometer.java")
 s = speed.read_text(encoding="utf-8")
 s = add_import(s, "import com.blackrussia.game.vostok.ui.hud.VostokHudController;")
@@ -55,17 +50,18 @@ if "private final VostokHudController vostokHud;" not in s:
         1,
     )
 
-if "vostokHud = VostokHudController.getOrCreate(activity);" not in s:
+if "vostokHud = VostokHudController.getOrCreate(" not in s:
+    # Pinned donor and later donor revisions use different constructor argument
+    # names. Capture the real argument instead of assuming `activity`.
     pattern = re.compile(
-        r"(public\s+Speedometer\s*\(\s*Activity\s+activity\s*\)\s*\{\s*\n\s*this\.activity\s*=\s*activity\s*;)"
+        r"public\s+Speedometer\s*\(\s*Activity\s+(\w+)\s*\)\s*\{"
     )
-    s, count = pattern.subn(
-        r"\1\n        vostokHud = VostokHudController.getOrCreate(activity);",
-        s,
-        count=1,
-    )
-    if count != 1:
-        raise SystemExit("031D Speedometer constructor anchor missing")
+    match = pattern.search(s)
+    if not match:
+        raise SystemExit("031D Speedometer constructor signature missing")
+    arg = match.group(1)
+    replacement = match.group(0) + f"\n        vostokHud = VostokHudController.getOrCreate({arg});"
+    s = s[:match.start()] + replacement + s[match.end():]
 
 marker = "vostokHud.updateVehicleState(speed, fuel, vostokCondition, mileage, engine, light, belt, lock);"
 if marker not in s:
@@ -84,8 +80,7 @@ show_pattern = re.compile(r"public\s+void\s+ShowSpeed\s*\(\s*\)\s*\{[^{}]*\}", r
 hide_pattern = re.compile(r"public\s+void\s+HideSpeed\s*\(\s*\)\s*\{[^{}]*\}", re.S)
 
 show_replacement = '''public void ShowSpeed() {
-        // 031D replaces the donor speedometer visual only. Vehicle control input
-        // remains native/donor-owned and continues to receive the same data.
+        // 031D replaces the donor speedometer visual only.
         Utils.HideLayout(mInputLayout, false);
         vostokHud.showVehicleHud();
     }'''
@@ -106,16 +101,14 @@ if "vostokHud.hideVehicleHud();" not in s:
 speed.write_text(s, encoding="utf-8")
 
 
-# ---------------------------------------------------------------------------
 # Native/server-facing quest bridge. 031D never invents a quest: the block is
-# hidden by default and appears only when authoritative code calls this bridge.
-# ---------------------------------------------------------------------------
+# hidden by default until authoritative gameplay code supplies data.
 activity = JAVA_ROOT / "com/nvidia/devtech/NvEventQueueActivity.java"
 a = activity.read_text(encoding="utf-8")
 anchor = "    public void closeAllVostokUi() { if (mVostokUi != null) mVostokUi.closeAllTransientUi(); }"
 quest_bridge = '''    public void closeAllVostokUi() { if (mVostokUi != null) mVostokUi.closeAllTransientUi(); }
 
-    // 031D authoritative quest HUD bridge. Hidden until the server/gameplay layer supplies data.
+    // 031D authoritative quest HUD bridge.
     public void showVostokQuest(String title, String objective, int current, int total) {
         if (mVostokUi != null) mVostokUi.showQuest(title, objective, current, total);
     }
@@ -130,9 +123,6 @@ if "showVostokQuest(String title" not in a:
 activity.write_text(a, encoding="utf-8")
 
 
-# ---------------------------------------------------------------------------
-# Contract gates before Gradle gets a chance to build.
-# ---------------------------------------------------------------------------
 controller = ROOT / "app/src/main/java/com/blackrussia/game/vostok/ui/hud/VostokHudController.java"
 if not controller.exists():
     raise SystemExit("031D VostokHudController overlay missing")
@@ -169,7 +159,6 @@ for forbidden in (
     if forbidden in controller_text:
         raise SystemExit(f"031D forbidden slogan present: {forbidden}")
 
-# Preserve working 027F interaction and 031A no-ChooseServer contracts.
 chat = ROOT / "Jni source/jni/chatwindow.cpp"
 if "~VOSTOK_UI~INTERACT:SHOW:NPC:" not in chat.read_text(encoding="utf-8", errors="ignore"):
     raise SystemExit("031D regression: protected 027F NPC interaction protocol missing")
