@@ -3,19 +3,19 @@ package com.blackrussia.game.vostok.ui;
 /**
  * Central migration switches for the VOSTOK client UI.
  *
- * 031B deliberately keeps donor/legacy surfaces alive until their VOSTOK
- * replacements pass a device smoke test. Do not flip these flags casually:
- * each replacement has its own promotion gate.
+ * Candidate flags may be enabled for source/device testing before promotion.
+ * MASTER promotion still requires the candidate gate; do not treat a true flag
+ * here as proof of runtime acceptance.
  */
 public final class VostokUiFeatureFlags {
     public static final boolean UI_CORE_ENABLED = true;
-
-    // Confirmed working VOSTOK surface.
     public static final boolean VOSTOK_INTERACTION_ENABLED = true;
 
-    // Deferred visual replacements. Legacy implementations remain active.
-    public static final boolean VOSTOK_HUD_ENABLED = false;
-    public static final boolean VOSTOK_SPEEDOMETER_ENABLED = false;
+    // 031D device-test candidate surfaces.
+    public static final boolean VOSTOK_HUD_ENABLED = true;
+    public static final boolean VOSTOK_SPEEDOMETER_ENABLED = true;
+
+    // Later candidates.
     public static final boolean VOSTOK_RADIAL_ENABLED = false;
     public static final boolean VOSTOK_INVENTORY_ENABLED = false;
     public static final boolean VOSTOK_PHONE_ENABLED = false;
