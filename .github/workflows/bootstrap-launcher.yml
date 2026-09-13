@@ -1,6 +1,7 @@
 name: Bootstrap Frozen VOSTOK Launcher
 
-# Triggered to restore and permanently freeze the accepted Candidate 022 launcher binary.
+# 031A restore trigger: keep the exact accepted Candidate 022 launcher binary
+# available to every full APK candidate; no visual substitution is allowed.
 on:
   workflow_dispatch:
   push:
@@ -55,5 +56,5 @@ jobs:
             echo 'Approved launcher already committed.'
             exit 0
           fi
-          git commit -m 'VOSTOK: freeze exact approved launcher binary from Candidate 022'
+          git commit -m 'VOSTOK: restore exact approved launcher binary for 031A'
           git push origin HEAD:main
