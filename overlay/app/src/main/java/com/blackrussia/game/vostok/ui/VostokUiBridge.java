@@ -5,6 +5,7 @@ import android.os.Looper;
 
 import com.blackrussia.game.gui.HudManager;
 import com.blackrussia.game.gui.Notification;
+import com.blackrussia.game.vostok.ui.hud.VostokHudController;
 
 import java.util.List;
 
@@ -12,13 +13,14 @@ import java.util.List;
  * Single Java-side UI bridge for VOSTOK gameplay overlays.
  *
  * Native/JNI-facing methods remain on NvEventQueueActivity for binary compatibility.
- * 031B adds VostokUiManager as the common screen/input/safe-area owner while
- * preserving the confirmed legacy HUD and Interaction implementation unchanged.
+ * 031D keeps donor chat/radar/native controls alive while routing player telemetry
+ * to the new VOSTOK HUD surface.
  */
 public final class VostokUiBridge {
     private final Activity activity;
     private final VostokUiManager uiManager;
     private final HudManager hudManager;
+    private final VostokHudController vostokHud;
     private final Notification notificationManager;
     private final InteractionUiManager interactionManager;
     private final InteractionCore interactionCore;
@@ -30,9 +32,8 @@ public final class VostokUiBridge {
         this.legacyNpcInteractionAction = interactionAction;
         uiManager = new VostokUiManager(activity);
 
-        // Do not migrate these working surfaces in 031B. Their VOSTOK replacements
-        // will be enabled one at a time after their own device promotion gates.
         hudManager = new HudManager(activity);
+        vostokHud = VostokHudController.getOrCreate(activity);
         notificationManager = new Notification(activity);
         interactionManager = new InteractionUiManager(activity, this::onInteractionPressed);
 
@@ -54,16 +55,13 @@ public final class VostokUiBridge {
                     }
                 },
                 (target, action) -> {
-                    // Runtime policy currently enables NPC only. Keep the legacy command strictly
-                    // scoped to NPC interaction so future resource/vehicle/player actions cannot
-                    // accidentally reuse the wrong transport.
                     if (target.type == InteractionContract.TARGET_NPC
                             && action.id == InteractionContract.ACTION_INTERACT
                             && legacyNpcInteractionAction != null) {
                         legacyNpcInteractionAction.run();
                     }
                 },
-                null // Visual radial menu plugs into VostokUiManager in its own candidate.
+                null
         );
     }
 
@@ -79,10 +77,6 @@ public final class VostokUiBridge {
         return !destroyed && uiManager.shouldBlockGameInput();
     }
 
-    /**
-     * Stable future native/server entry point. It is harmless until a concrete
-     * screen controller is registered for the supplied wire id.
-     */
     public void showUiScreen(int wireId) {
         runOnUiThread(() -> uiManager.openScreen(wireId));
     }
@@ -98,19 +92,37 @@ public final class VostokUiBridge {
     public void updateHudInfo(int health, int armour, int hunger, int weaponId, int ammo,
                               int playerId, int money, int wanted) {
         runOnUiThread(() -> {
+            // Keep donor logic alive for radar/chat/weapon/wanted/native compatibility.
             hudManager.UpdateHudInfo(
                     health, armour, hunger, weaponId, ammo, playerId, money, wanted
             );
+            // 031D consumes the same authoritative values, including hunger/satiety.
+            vostokHud.updatePlayerState(health, armour, hunger, money);
+            vostokHud.hideLegacyHudElements();
             interactionManager.setWeaponActive(usesCombatControls(weaponId));
         });
     }
 
     public void showHud() {
-        runOnUiThread(hudManager::ShowHud);
+        runOnUiThread(() -> {
+            hudManager.ShowHud();
+            vostokHud.showHud();
+        });
     }
 
     public void hideHud() {
-        runOnUiThread(hudManager::HideHud);
+        runOnUiThread(() -> {
+            hudManager.HideHud();
+            vostokHud.hideHud();
+        });
+    }
+
+    public void showQuest(String title, String objective, int current, int total) {
+        runOnUiThread(() -> vostokHud.showQuest(title, objective, current, total));
+    }
+
+    public void hideQuest() {
+        runOnUiThread(vostokHud::hideQuest);
     }
 
     public void showNotification(int type, String text, int duration,
@@ -136,9 +148,6 @@ public final class VostokUiBridge {
         runOnUiThread(() -> notificationManager.ShowError(text, duration));
     }
 
-    /**
-     * Current native compatibility entry point. It is intentionally NPC-only for this milestone.
-     */
     public void showInteraction(float distanceMeters) {
         showNpcInteraction(distanceMeters);
     }
@@ -151,10 +160,6 @@ public final class VostokUiBridge {
         runOnUiThread(interactionCore::hide);
     }
 
-    /**
-     * Future Java/native adapter point for authoritative candidate sets. Target kinds other than
-     * NPC remain filtered until their owning gameplay system explicitly enables them.
-     */
     public void presentInteractionTargets(List<InteractionCore.Target> targets) {
         runOnUiThread(() -> interactionCore.present(targets));
     }
@@ -163,49 +168,35 @@ public final class VostokUiBridge {
         runOnUiThread(() -> interactionCore.setTargetTypeEnabled(targetType, enabled));
     }
 
-    /**
-     * Allows combat/special UI to reserve action-button slots without hard-coding coordinates.
-     * In-vehicle engine/driving controls remain owned by the speedometer UI, not InteractionCore.
-     */
     public void setInteractionContext(int flags, int reservedActionSlots) {
         runOnUiThread(() -> interactionCore.setHudContext(flags, reservedActionSlots));
     }
 
     public void shutdown() {
-        if (destroyed) {
-            return;
-        }
+        if (destroyed) return;
         destroyed = true;
         Runnable cleanup = () -> {
             notificationManager.Shutdown();
             interactionCore.shutdown();
             interactionManager.shutdown();
+            vostokHud.shutdown();
             uiManager.shutdown();
         };
-        if (Looper.myLooper() == Looper.getMainLooper()) {
-            cleanup.run();
-        } else {
-            activity.runOnUiThread(cleanup);
-        }
+        if (Looper.myLooper() == Looper.getMainLooper()) cleanup.run();
+        else activity.runOnUiThread(cleanup);
     }
 
     private void onInteractionPressed() {
-        if (!destroyed) {
-            interactionCore.onPrimaryPressed();
-        }
+        if (!destroyed) interactionCore.onPrimaryPressed();
     }
 
     private void runOnUiThread(Runnable action) {
-        if (destroyed) {
-            return;
-        }
+        if (destroyed) return;
         if (Looper.myLooper() == Looper.getMainLooper()) {
             action.run();
         } else {
             activity.runOnUiThread(() -> {
-                if (!destroyed) {
-                    action.run();
-                }
+                if (!destroyed) action.run();
             });
         }
     }
