@@ -3,22 +3,28 @@ from pathlib import Path
 import runpy
 import sys
 
-# Candidate 022 build hook. The workflow already invokes this validator after
-# apply_vostok_native_ui_bridge.py, so apply the focused native control patch
-# here without duplicating the large Android workflow. Keep this explicit until
-# the 022 device smoke test passes, then fold it into the canonical native patch.
-control_patch = Path(__file__).with_name("apply_vostok_control_fix_022.py")
-if not control_patch.is_file():
-    raise SystemExit("missing Candidate 022 control patch")
-runpy.run_path(str(control_patch), run_name="__main__")
+# Candidate 022/023 hooks are kept here for compatibility with older full-build
+# workflows. Newer workflows may already apply them explicitly, so make these
+# hooks idempotent instead of attempting the same source rewrite twice.
+localplayer = Path("client/Jni source/jni/net/localplayer.cpp")
+localplayer_text = localplayer.read_text(errors="replace") if localplayer.is_file() else ""
+if "VOSTOK CONTROL: Spawn enter" not in localplayer_text:
+    control_patch = Path(__file__).with_name("apply_vostok_control_fix_022.py")
+    if not control_patch.is_file():
+        raise SystemExit("missing Candidate 022 control patch")
+    runpy.run_path(str(control_patch), run_name="__main__")
+else:
+    print("Candidate 022 control patch already present; validator hook skipped")
 
-# Candidate 023: add only the narrow server->native Interaction button transport.
-# This deliberately runs after the 022 control fix and does not touch launcher,
-# splash/loading screens, HUD layout, auth UI, or gameplay controls.
-interaction_patch = Path(__file__).with_name("apply_vostok_interaction_button_023.py")
-if not interaction_patch.is_file():
-    raise SystemExit("missing Candidate 023 interaction button patch")
-runpy.run_path(str(interaction_patch), run_name="__main__")
+chat = Path("client/Jni source/jni/chatwindow.cpp")
+chat_text = chat.read_text(errors="replace") if chat.is_file() else ""
+if "g_pJavaWrapper->ShowVostokInteraction(distanceMeters);" not in chat_text:
+    interaction_patch = Path(__file__).with_name("apply_vostok_interaction_button_023.py")
+    if not interaction_patch.is_file():
+        raise SystemExit("missing Candidate 023 interaction button patch")
+    runpy.run_path(str(interaction_patch), run_name="__main__")
+else:
+    print("Candidate 023 interaction transport already present; validator hook skipped")
 
 root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("client")
 java_root = root / "app/src/main/java/com/blackrussia/game/vostok/account"
