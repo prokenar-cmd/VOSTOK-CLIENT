@@ -110,6 +110,11 @@ activity.write_text(a, encoding='utf-8')
 
 speed = unique_java('Speedometer.java')
 s = speed.read_text(encoding='utf-8')
+if 'import com.nvidia.devtech.NvEventQueueActivity;' not in s:
+    package_match = re.search(r'^package\s+[^;]+;\s*\n', s, re.M)
+    if not package_match:
+        raise SystemExit('031E Speedometer package anchor missing')
+    s = s[:package_match.end()] + '\nimport com.nvidia.devtech.NvEventQueueActivity;\n' + s[package_match.end():]
 if 'setVostokVehicleMode(true);' not in s:
     show = '        vostokHud.showVehicleHud();\n'
     if s.count(show) != 1:
@@ -153,6 +158,7 @@ for needle in (
     'command = "/vui_lock"',
     'Charset.forName("windows-1251")',
     'public void setVehicleMode(boolean active)',
+    'import com.nvidia.devtech.NvEventQueueActivity;',
     'setVostokVehicleMode(true)',
     'setVostokVehicleMode(false)',
 ):
