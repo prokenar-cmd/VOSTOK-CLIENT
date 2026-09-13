@@ -20,7 +20,7 @@ import com.blackrussia.game.R;
  * VOSTOK in-game loading overlay.
  *
  * 031A contract:
- * - the background is a clean replaceable image resource;
+ * - the background is a dedicated clean replaceable resource;
  * - progress/status/tips are real Android views, never baked into the image;
  * - no donor/system spinner is used;
  * - legacy native progress > 100 closes loading instead of opening ChooseServer.
@@ -74,11 +74,11 @@ public final class VostokLoadingOverlay {
                 ViewGroup.LayoutParams.MATCH_PARENT
         ));
 
-        // Clean artwork only. The launcher lock installs this approved VOSTOK
-        // image resource before APK compilation. Loading UI is drawn separately.
+        // Clean background only. The resource contains no bar, percent, tip,
+        // spinner or status text; all of those remain live UI below.
         ImageView background = new ImageView(activity);
         background.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        background.setImageResource(R.drawable.vostok_launcher_reference);
+        background.setImageResource(R.drawable.vostok_loading_background);
         root.addView(background, matchParent());
 
         View scrim = new View(activity);
