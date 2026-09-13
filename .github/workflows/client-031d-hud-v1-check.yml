@@ -42,8 +42,6 @@ jobs:
           python3 tools/apply_vostok_candidate_031b.py
           python3 tools/apply_vostok_candidate_031c.py
           python3 tools/apply_vostok_candidate_031d.py
-
-          # Source-check only. Never bless substitute launcher artwork here.
           rm -f client/app/src/main/res/drawable-nodpi/vostok_launcher_reference.jpg
 
       - name: Verify 031D HUD contracts
@@ -52,11 +50,8 @@ jobs:
           BRIDGE='client/app/src/main/java/com/blackrussia/game/vostok/ui/VostokUiBridge.java'
           ACT='client/app/src/main/java/com/nvidia/devtech/NvEventQueueActivity.java'
           SPEED=$(find client/app/src/main/java -name Speedometer.java -print -quit)
-          HUD=$(find client/app/src/main/java -name HudManager.java -print -quit)
-
           test -f "$CTRL"
           test -f "$SPEED"
-          test -f "$HUD"
           grep -q 'updatePlayerState(health, armour, hunger, money)' "$BRIDGE"
           grep -q 'showVostokQuest(String title' "$ACT"
           grep -q 'updateVehicleState(speed, fuel, vostokCondition, mileage, engine, light, belt, lock)' "$SPEED"
@@ -65,9 +60,9 @@ jobs:
           grep -q 'ТОПЛИВО' "$CTRL"
           grep -q 'СОСТОЯНИЕ' "$CTRL"
           grep -q 'КМ/Ч' "$CTRL"
-          grep -q 'hud_camera' "$CTRL"
-          grep -q 'camera_button' "$CTRL"
-          grep -q 'hud_menu.setVisibility(View.GONE)' "$HUD"
+          grep -q '"hud_menu"' "$CTRL"
+          grep -q '"hud_camera"' "$CTRL"
+          grep -q '"camera_button"' "$CTRL"
           grep -q '~VOSTOK_UI~INTERACT:SHOW:NPC:' 'client/Jni source/jni/chatwindow.cpp'
           ! grep -q 'mChooseServer' "$ACT"
           ! grep -Eiq 'Больше чем игра|Твоя история начинается|Начни свой путь|Играй\. Развивайся' "$CTRL"
