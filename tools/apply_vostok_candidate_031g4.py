@@ -8,64 +8,34 @@ def replace_once(path: Path, old: str, new: str, label: str) -> None:
         return
     count = text.count(old)
     if count != 1:
-        raise SystemExit(f"031G4 {label} anchor mismatch in {path}: {count}")
+        raise SystemExit(f"031G4.1 {label} anchor mismatch in {path}: {count}")
     path.write_text(text.replace(old, new, 1), encoding="utf-8")
 
 
 activity = Path("client/app/src/main/java/com/nvidia/devtech/NvEventQueueActivity.java")
 render_layout = Path("client/app/src/main/res/layout/main_render_screen.xml")
 
-# 031G3 still tied connection start to a synthetic '>100%' loading milestone.
-# The pinned donor splash normalizes the local GTA progress to <=100, so that
-# milestone is not a valid network lifecycle signal. The original server screen
-# allowed its PLAY action while the splash was already visible. Replicate only
-# that network action, automatically and exactly once, when the in-game splash
-# becomes active. Spawn selection/ticket preparation has already completed in
-# VostokEntryActivity before GTASA is started.
-replace_once(
-    activity,
-    '''    public void updateSplash(int percent) {
-        if (mVostokLoading != null) mVostokLoading.update(percent);
-        if (percent > 100 && !mVostokAutoConnectIssued) {
+# KEEP 031G3's proven late autoconnect trigger. Native InitInGame emits
+# UpdateSplash(101) only after pSettings/pGame have been initialized. The 031G4
+# regression moved sendRPC(2,...) into showSplash(), which runs from the very
+# first splash frame and can execute while pSettings is still null, causing the
+# observed native SIGSEGV in Java_com_nvidia_devtech_NvEventQueueActivity_sendRPC.
+activity_text = activity.read_text(encoding="utf-8")
+required_safe_trigger = '''        if (percent > 100 && !mVostokAutoConnectIssued) {
             mVostokAutoConnectIssued = true;
             runOnUiThread(() -> {
                 // Native action 2/0 is the proven VOSTOK DEV server-connect path.
                 // The byte payload is unused by the native type=2/action=0 branch.
                 sendRPC(2, "VOSTOK".getBytes(), 0);
             });
-        }
-    }''',
-    '''    public void updateSplash(int percent) {
-        if (mVostokLoading != null) mVostokLoading.update(percent);
-    }''',
-    "remove invalid >100 autoconnect trigger",
-)
+        }'''
+if required_safe_trigger not in activity_text:
+    raise SystemExit("031G4.1 safe >100 autoconnect trigger from 031G3 is missing")
+if "issueVostokAutoConnect()" in activity_text:
+    raise SystemExit("031G4.1 unsafe showSplash autoconnect must not be present")
 
-replace_once(
-    activity,
-    '''    public void showSplash() { if (mVostokLoading != null) mVostokLoading.show(); }''',
-    '''    public void showSplash() {
-        if (mVostokLoading != null) mVostokLoading.show();
-        issueVostokAutoConnect();
-    }
-
-    private void issueVostokAutoConnect() {
-        if (mVostokAutoConnectIssued) return;
-        mVostokAutoConnectIssued = true;
-        runOnUiThread(() -> {
-            // This is the original server-screen PLAY native action, without
-            // exposing or depending on the donor ChooseServer UI.
-            sendRPC(2, "VOSTOK".getBytes(), 0);
-        });
-    }''',
-    "splash-time autoconnect",
-)
-
-# The donor server selector is not merely a choice page: its layout also owns
-# the old mylogo loading screen and is VISIBLE by default. 031A removed the
-# ChooseServer controller but left this include in the active render hierarchy,
-# which is why the old loading artwork reappears underneath the VOSTOK overlay.
-# Remove the entire donor selector/loading subtree from the render screen.
+# Remove only the donor server-selector/loading subtree. It owns the old mylogo
+# loading background and is unrelated to the safe native-ready milestone above.
 replace_once(
     render_layout,
     '        <include layout="@layout/br_serverselect" />\n',
@@ -75,30 +45,25 @@ replace_once(
 
 activity_text = activity.read_text(encoding="utf-8")
 layout_text = render_layout.read_text(encoding="utf-8")
-required = (
+for needle in (
     "private boolean mVostokAutoConnectIssued = false;",
-    "private void issueVostokAutoConnect()",
+    "percent > 100 && !mVostokAutoConnectIssued",
     'sendRPC(2, "VOSTOK".getBytes(), 0)',
     "mVostokLoading.completeWorldEntry()",
-)
-for needle in required:
-    if needle not in activity_text:
-        raise SystemExit(f"031G4 verification missing: {needle}")
-
-for forbidden in (
-    "percent > 100 && !mVostokAutoConnectIssued",
-    'layout="@layout/br_serverselect"',
 ):
-    haystack = activity_text if "percent" in forbidden else layout_text
-    if forbidden in haystack:
-        raise SystemExit(f"031G4 donor/lifecycle regression remains: {forbidden}")
+    if needle not in activity_text:
+        raise SystemExit(f"031G4.1 verification missing: {needle}")
+
+if 'layout="@layout/br_serverselect"' in layout_text:
+    raise SystemExit("031G4.1 donor server-selector include still present")
 
 for forbidden in (
     "mChooseServer.Update",
     "mChooseServer.Show",
     "new ChooseServer",
+    "private void issueVostokAutoConnect()",
 ):
     if forbidden in activity_text:
-        raise SystemExit(f"031G4 legacy ChooseServer controller returned: {forbidden}")
+        raise SystemExit(f"031G4.1 legacy/unsafe lifecycle code present: {forbidden}")
 
-print("Applied VOSTOK Candidate 031G4 server-selector decoupling + splash-time autoconnect")
+print("Applied VOSTOK Candidate 031G4.1: server-selector removed, safe native-ready autoconnect preserved")
