@@ -4,7 +4,7 @@ from pathlib import Path
 
 def replace_once(path: Path, old: str, new: str, label: str) -> None:
     text = path.read_text(encoding="utf-8")
-    if new in text:
+    if new and new in text:
         return
     count = text.count(old)
     if count != 1:
