@@ -52,6 +52,7 @@ jobs:
           python3 tools/apply_vostok_candidate_031g5_2.py
           python3 tools/apply_vostok_candidate_031h_hud_editor.py
           python3 tools/apply_vostok_candidate_031h1_hud_calibration.py
+          python3 tools/apply_vostok_candidate_031h1_compilefix.py
           rm -f client/app/src/main/res/drawable-nodpi/vostok_launcher_reference.jpg
 
       - name: Verify 031H1 contracts
@@ -71,8 +72,8 @@ jobs:
           grep -q 'VostokHudEditorView editorView' "$HUD"
           grep -q 'TARGET_RADAR' "$EDITOR"
           ! grep -q 'TARGET_FIST' "$EDITOR"
-          grep -q 'NvEventQueueActivity.setNativeHudElementPosition(6, editorRadarX, editorRadarY);' "$HUD"
-          grep -q 'NvEventQueueActivity.setNativeHudElementPosition(8, 5000, 5000);' "$HUD"
+          grep -q '((NvEventQueueActivity) activity).setNativeHudElementPosition(6, editorRadarX, editorRadarY);' "$HUD"
+          grep -q '((NvEventQueueActivity) activity).setNativeHudElementPosition(8, 5000, 5000);' "$HUD"
           grep -q 'drawVerticalStatClean' "$HUD"
           grep -q 'drawHungerClean' "$HUD"
           grep -q 'putInt("radar_x", editorRadarX)' "$HUD"
