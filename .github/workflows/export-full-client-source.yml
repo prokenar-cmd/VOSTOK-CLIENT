@@ -1,4 +1,4 @@
-name: Export VOSTOK Full Client Source 031G5.2
+name: Export VOSTOK Full Client Source 031H1
 
 on:
   push:
@@ -21,7 +21,7 @@ jobs:
           git checkout b7574b3ad246f31a15d15a28075936dd62e65fad
           rm -rf .git
 
-      - name: Apply cumulative VOSTOK lineage through 031G5.2
+      - name: Apply cumulative VOSTOK lineage through 031H1
         run: |
           cp -a overlay/. client/
           rm -f client/app/src/main/java/com/blackrussia/launcher/other/UnZipCallback.java
@@ -45,13 +45,15 @@ jobs:
           python3 tools/apply_vostok_candidate_031g5.py
           python3 tools/apply_vostok_candidate_031g5_1.py
           python3 tools/apply_vostok_candidate_031g5_2.py
+          python3 tools/apply_vostok_candidate_031h_hud_editor.py
+          python3 tools/apply_vostok_candidate_031h1_hud_calibration.py
 
       - name: Put buildable Android Gradle config into source package
         run: |
           python3 - <<'PY'
           from pathlib import Path
           Path('client/build.gradle').write_text('''buildscript {\n    repositories { mavenCentral(); google(); jcenter() }\n    dependencies { classpath 'com.android.tools.build:gradle:8.2.1' }\n}\nallprojects { repositories { mavenCentral(); google(); jcenter(); maven { url "https://jitpack.io" } } }\ntask clean(type: Delete) { delete rootProject.buildDir }\n''')
-          Path('client/app/build.gradle').write_text('''apply plugin: 'com.android.application'\nandroid {\n    namespace "com.blackrussia.game"\n    compileSdkVersion 30\n    compileOptions { sourceCompatibility 1.8; targetCompatibility 1.8 }\n    defaultConfig { minSdkVersion 17; targetSdkVersion 28; applicationId "com.vostok.roleplay"; versionName "031g5.2-hud-cleanup"; versionCode 44; vectorDrawables.useSupportLibrary = true; multiDexEnabled = true; ndk { abiFilters 'armeabi-v7a' } }\n}\ndependencies {\n    implementation fileTree(dir: "libs", include: ["*.jar"])\n    implementation 'androidx.appcompat:appcompat:1.1.0'\n    implementation 'com.google.android.material:material:1.0.0'\n    implementation 'com.tuyenmonkey:mkloader:1.4.0'\n    implementation group: 'org.ini4j', name: 'ini4j', version: '0.5.4'\n    implementation 'androidx.constraintlayout:constraintlayout:2.0.4'\n    implementation "com.github.skydoves:colorpickerpreference:2.0.4"\n    implementation 'com.github.Triggertrap:SeekArc:v1.1'\n    implementation 'com.akexorcist:round-corner-progress-bar:2.1.2'\n    implementation 'io.github.dinuscxj:circleprogressbar:1.4.1'\n    implementation 'com.makeramen:roundedimageview:2.3.0'\n    implementation 'com.github.bumptech.glide:glide:4.13.0'\n    annotationProcessor 'com.github.bumptech.glide:compiler:4.13.0'\n    implementation 'com.google.firebase:firebase-database:20.0.4'\n    implementation 'com.github.hzy3774:AndroidP7zip:v1.7.2'\n    implementation 'com.squareup.retrofit2:converter-gson:2.1.0'\n    implementation platform('com.google.firebase:firebase-bom:29.2.1')\n    implementation 'com.liulishuo.filedownloader:library:1.7.7'\n}\n''')
+          Path('client/app/build.gradle').write_text('''apply plugin: 'com.android.application'\nandroid {\n    namespace "com.blackrussia.game"\n    compileSdkVersion 30\n    compileOptions { sourceCompatibility 1.8; targetCompatibility 1.8 }\n    defaultConfig { minSdkVersion 17; targetSdkVersion 28; applicationId "com.vostok.roleplay"; versionName "031h1-hud-calibration"; versionCode 46; vectorDrawables.useSupportLibrary = true; multiDexEnabled = true; ndk { abiFilters 'armeabi-v7a' } }\n}\ndependencies {\n    implementation fileTree(dir: "libs", include: ["*.jar"])\n    implementation 'androidx.appcompat:appcompat:1.1.0'\n    implementation 'com.google.android.material:material:1.0.0'\n    implementation 'com.tuyenmonkey:mkloader:1.4.0'\n    implementation group: 'org.ini4j', name: 'ini4j', version: '0.5.4'\n    implementation 'androidx.constraintlayout:constraintlayout:2.0.4'\n    implementation "com.github.skydoves:colorpickerpreference:2.0.4"\n    implementation 'com.github.Triggertrap:SeekArc:v1.1'\n    implementation 'com.akexorcist:round-corner-progress-bar:2.1.2'\n    implementation 'io.github.dinuscxj:circleprogressbar:1.4.1'\n    implementation 'com.makeramen:roundedimageview:2.3.0'\n    implementation 'com.github.bumptech.glide:glide:4.13.0'\n    annotationProcessor 'com.github.bumptech.glide:compiler:4.13.0'\n    implementation 'com.google.firebase:firebase-database:20.0.4'\n    implementation 'com.github.hzy3774:AndroidP7zip:v1.7.2'\n    implementation 'com.squareup.retrofit2:converter-gson:2.1.0'\n    implementation platform('com.google.firebase:firebase-bom:29.2.1')\n    implementation 'com.liulishuo.filedownloader:library:1.7.7'\n}\n''')
           p=Path('client/gradle/wrapper/gradle-wrapper.properties')
           import re
           p.write_text(re.sub(r'distributionUrl=.*', 'distributionUrl=https\\://services.gradle.org/distributions/gradle-8.2-bin.zip', p.read_text()))
@@ -61,27 +63,38 @@ jobs:
         run: |
           cat > client/VOSTOK_README_BUILD.txt <<'EOF'
           VOSTOK RP CLIENT SOURCE EXPORT
-          Base: candidate-031g5-hud-restore / 031G5.2
+          Current candidate: 031H1 HUD Calibration
+          Branch: candidate-031g5-hud-restore
           Donor: Parad1st/Black-Russia-Source @ b7574b3ad246f31a15d15a28075936dd62e65fad
           Package: com.vostok.roleplay
 
-          This package contains the full Android client source tree after applying the cumulative VOSTOK patches through 031G5.2.
-          Open the client directory in Android Studio or build with: ./gradlew :app:assembleDebug
+          Full Android/JNI client source after applying the cumulative VOSTOK lineage through 031H1.
+          Open this client directory in Android Studio or Codex.
+          Android build command: ./gradlew :app:assembleDebug
 
-          The accepted VOSTOK launcher background is injected into the final handoff archive separately as:
-          app/src/main/res/drawable-nodpi/vostok_launcher_reference.jpg
-          Expected SHA-256: 8ede863d84340efc989af2fa35040d8df566c90e9c96fe7c2fede8aa8c6406e0
-          Expected size: 1891x831 JPEG.
+          Current HUD files:
+          app/src/main/java/com/blackrussia/game/vostok/ui/hud/VostokHudController.java
+          app/src/main/java/com/blackrussia/game/vostok/ui/hud/VostokHudEditorView.java
+
+          031H1 goals present in this source:
+          - HUD Editor DEV mode.
+          - native fist/ammo hidden.
+          - native radar calibration X/Y/scale.
+          - radar calibration persisted.
+          - redrawn VOSTOK left HUD block.
+
+          IMPORTANT: Candidate is not MASTER until device/runtime smoke tests pass.
+          Preserve working launcher/loading/autoconnect, libsamp, inventory, radial, vehicle UI and interaction systems.
           EOF
 
       - name: Pack full source
         run: |
           rm -rf client/.gradle client/app/build client/build
-          zip -qr VOSTOK_CLIENT_FULL_SOURCE_031G5_2.zip client
+          zip -qr VOSTOK_CLIENT_FULL_SOURCE_031H1.zip client
 
       - name: Upload full source archive
         uses: actions/upload-artifact@v4
         with:
-          name: VOSTOK-CLIENT-FULL-SOURCE-031G5.2
-          path: VOSTOK_CLIENT_FULL_SOURCE_031G5_2.zip
+          name: VOSTOK-CLIENT-FULL-SOURCE-031H1
+          path: VOSTOK_CLIENT_FULL_SOURCE_031H1.zip
           if-no-files-found: error
