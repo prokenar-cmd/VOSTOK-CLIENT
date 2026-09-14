@@ -47,12 +47,10 @@ replace_once(
 # so the legacy donor splash cannot flash back during network authentication.
 replace_once(
     activity,
-    "    public void showHud() { runOnUiThread(() -> { mHudManager.ShowHud(); }); }",
+    "    public void showHud() { if (mVostokUi != null) mVostokUi.showHud(); }",
     '''    public void showHud() {
-        runOnUiThread(() -> {
-            mHudManager.ShowHud();
-            if (mVostokLoading != null) mVostokLoading.completeWorldEntry();
-        });
+        if (mVostokUi != null) mVostokUi.showHud();
+        if (mVostokLoading != null) mVostokLoading.completeWorldEntry();
     }''',
     "world-ready loading dismissal",
 )
