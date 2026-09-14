@@ -59,6 +59,7 @@ jobs:
       - name: Apply 031I launcher ownership boundary
         run: |
           python3 tools/apply_vostok_candidate_031i_launcher_decouple.py client
+          python3 tools/apply_vostok_candidate_031i_compilefix.py
 
       - name: Verify preserved 031F-031H1 game contracts
         run: |
