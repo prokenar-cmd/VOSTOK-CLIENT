@@ -1,4 +1,4 @@
-name: VOSTOK 031H HUD Editor DEV
+name: VOSTOK 031H1 HUD Calibration
 
 on:
   push:
@@ -26,7 +26,7 @@ jobs:
           cd client
           git checkout b7574b3ad246f31a15d15a28075936dd62e65fad
 
-      - name: Apply cumulative VOSTOK lineage through 031H
+      - name: Apply cumulative VOSTOK lineage through 031H1
         run: |
           cp -a overlay/. client/
           rm -f client/app/src/main/java/com/blackrussia/launcher/other/UnZipCallback.java
@@ -51,9 +51,10 @@ jobs:
           python3 tools/apply_vostok_candidate_031g5_1.py
           python3 tools/apply_vostok_candidate_031g5_2.py
           python3 tools/apply_vostok_candidate_031h_hud_editor.py
+          python3 tools/apply_vostok_candidate_031h1_hud_calibration.py
           rm -f client/app/src/main/res/drawable-nodpi/vostok_launcher_reference.jpg
 
-      - name: Verify 031H contracts
+      - name: Verify 031H1 contracts
         run: |
           ACT='client/app/src/main/java/com/nvidia/devtech/NvEventQueueActivity.java'
           HUD='client/app/src/main/java/com/blackrussia/game/vostok/ui/hud/VostokHudController.java'
@@ -68,15 +69,13 @@ jobs:
           ! grep -q 'hudManager.ShowHud();' "$BRIDGE"
           ! grep -q 'drawJoystickVisual(c);' "$HUD"
           grep -q 'VostokHudEditorView editorView' "$HUD"
-          grep -q 'toggleHudEditor();' "$HUD"
-          grep -q 'public void editorMove' "$HUD"
-          grep -q 'public void editorScale' "$HUD"
-          grep -q 'public void editorSave' "$HUD"
           grep -q 'TARGET_RADAR' "$EDITOR"
-          grep -q 'TARGET_FIST' "$EDITOR"
-          grep -q 'СОХРАНИТЬ' "$EDITOR"
-          grep -q 'getNativeHudElementPosition' "$HUD"
-          grep -q 'getNativeHudElementScale' "$HUD"
+          ! grep -q 'TARGET_FIST' "$EDITOR"
+          grep -q 'NvEventQueueActivity.setNativeHudElementPosition(6, editorRadarX, editorRadarY);' "$HUD"
+          grep -q 'NvEventQueueActivity.setNativeHudElementPosition(8, 5000, 5000);' "$HUD"
+          grep -q 'drawVerticalStatClean' "$HUD"
+          grep -q 'drawHungerClean' "$HUD"
+          grep -q 'putInt("radar_x", editorRadarX)' "$HUD"
           grep -q 'Shop: trolley' "$HUD"
           grep -q 'Inventory: compact backpack' "$HUD"
           grep -q 'drawVehicleHud(c)' "$HUD"
@@ -91,7 +90,7 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           Path('build.gradle').write_text('''buildscript {\n    repositories { mavenCentral(); google(); jcenter() }\n    dependencies { classpath 'com.android.tools.build:gradle:8.2.1' }\n}\nallprojects { repositories { mavenCentral(); google(); jcenter(); maven { url "https://jitpack.io" } } }\ntask clean(type: Delete) { delete rootProject.buildDir }\n''')
-          Path('app/build.gradle').write_text('''apply plugin: 'com.android.application'\nandroid {\n    namespace "com.blackrussia.game"\n    compileSdkVersion 30\n    compileOptions { sourceCompatibility 1.8; targetCompatibility 1.8 }\n    defaultConfig { minSdkVersion 17; targetSdkVersion 28; applicationId "com.vostok.roleplay"; versionName "031h-hud-editor-dev"; versionCode 45; vectorDrawables.useSupportLibrary = true; multiDexEnabled = true; ndk { abiFilters 'armeabi-v7a' } }\n}\ndependencies {\n    implementation fileTree(dir: "libs", include: ["*.jar"])\n    implementation 'androidx.appcompat:appcompat:1.1.0'\n    implementation 'com.google.android.material:material:1.0.0'\n    implementation 'com.tuyenmonkey:mkloader:1.4.0'\n    implementation group: 'org.ini4j', name: 'ini4j', version: '0.5.4'\n    implementation 'androidx.constraintlayout:constraintlayout:2.0.4'\n    implementation "com.github.skydoves:colorpickerpreference:2.0.4"\n    implementation 'com.github.Triggertrap:SeekArc:v1.1'\n    implementation 'com.akexorcist:round-corner-progress-bar:2.1.2'\n    implementation 'io.github.dinuscxj:circleprogressbar:1.4.1'\n    implementation 'com.makeramen:roundedimageview:2.3.0'\n    implementation 'com.github.bumptech.glide:glide:4.13.0'\n    annotationProcessor 'com.github.bumptech.glide:compiler:4.13.0'\n    implementation 'com.google.firebase:firebase-database:20.0.4'\n    implementation 'com.github.hzy3774:AndroidP7zip:v1.7.2'\n    implementation 'com.squareup.retrofit2:converter-gson:2.1.0'\n    implementation platform('com.google.firebase:firebase-bom:29.2.1')\n    implementation 'com.liulishuo.filedownloader:library:1.7.7'\n}\n''')
+          Path('app/build.gradle').write_text('''apply plugin: 'com.android.application'\nandroid {\n    namespace "com.blackrussia.game"\n    compileSdkVersion 30\n    compileOptions { sourceCompatibility 1.8; targetCompatibility 1.8 }\n    defaultConfig { minSdkVersion 17; targetSdkVersion 28; applicationId "com.vostok.roleplay"; versionName "031h1-hud-calibration"; versionCode 46; vectorDrawables.useSupportLibrary = true; multiDexEnabled = true; ndk { abiFilters 'armeabi-v7a' } }\n}\ndependencies {\n    implementation fileTree(dir: "libs", include: ["*.jar"])\n    implementation 'androidx.appcompat:appcompat:1.1.0'\n    implementation 'com.google.android.material:material:1.0.0'\n    implementation 'com.tuyenmonkey:mkloader:1.4.0'\n    implementation group: 'org.ini4j', name: 'ini4j', version: '0.5.4'\n    implementation 'androidx.constraintlayout:constraintlayout:2.0.4'\n    implementation "com.github.skydoves:colorpickerpreference:2.0.4"\n    implementation 'com.github.Triggertrap:SeekArc:v1.1'\n    implementation 'com.akexorcist:round-corner-progress-bar:2.1.2'\n    implementation 'io.github.dinuscxj:circleprogressbar:1.4.1'\n    implementation 'com.makeramen:roundedimageview:2.3.0'\n    implementation 'com.github.bumptech.glide:glide:4.13.0'\n    annotationProcessor 'com.github.bumptech.glide:compiler:4.13.0'\n    implementation 'com.google.firebase:firebase-database:20.0.4'\n    implementation 'com.github.hzy3774:AndroidP7zip:v1.7.2'\n    implementation 'com.squareup.retrofit2:converter-gson:2.1.0'\n    implementation platform('com.google.firebase:firebase-bom:29.2.1')\n    implementation 'com.liulishuo.filedownloader:library:1.7.7'\n}\n''')
           p=Path('gradle/wrapper/gradle-wrapper.properties')
           import re
           p.write_text(re.sub(r'distributionUrl=.*', 'distributionUrl=https\\://services.gradle.org/distributions/gradle-8.2-bin.zip', p.read_text()))
@@ -111,6 +110,6 @@ jobs:
       - name: Upload source-build APK
         uses: actions/upload-artifact@v4
         with:
-          name: VOSTOK-031H-hud-editor-dev-apk
+          name: VOSTOK-031H1-hud-calibration-apk
           path: client/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
