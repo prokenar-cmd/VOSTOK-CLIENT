@@ -1,0 +1,114 @@
+name: VOSTOK 031F Radial Menu Check
+
+on:
+  push:
+    branches: [ candidate-031f-radial-menu ]
+    paths:
+      - 'overlay/**'
+      - 'tools/**'
+      - '.github/workflows/client-031f-radial-menu-check.yml'
+  workflow_dispatch:
+
+jobs:
+  source-check:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Fetch pinned donor source
+        run: |
+          git clone https://github.com/Parad1st/Black-Russia-Source.git client
+          cd client
+          git checkout b7574b3ad246f31a15d15a28075936dd62e65fad
+
+      - name: Apply full VOSTOK lineage through 031F
+        run: |
+          cp -a overlay/. client/
+          rm -f client/app/src/main/java/com/blackrussia/launcher/other/UnZipCallback.java
+          python3 tools/apply_vostok_ui_foundation.py
+          python3 tools/apply_vostok_native_ui_bridge.py
+          python3 tools/apply_vostok_control_fix_022.py
+          python3 tools/apply_vostok_interaction_button_023.py
+          python3 tools/validate_account_core.py client
+          python3 tools/apply_vostok_candidate_024.py
+          python3 tools/apply_vostok_candidate_026.py
+          python3 tools/apply_vostok_candidate_027f.py
+          python3 tools/apply_vostok_candidate_031a.py
+          python3 tools/apply_vostok_candidate_031b.py
+          python3 tools/apply_vostok_candidate_031c.py
+          python3 tools/apply_vostok_candidate_031d.py
+          python3 tools/apply_vostok_candidate_031e.py
+          python3 tools/apply_vostok_candidate_031f.py
+          rm -f client/app/src/main/res/drawable-nodpi/vostok_launcher_reference.jpg
+
+      - name: Verify 031F radial contracts and protected lineage
+        run: |
+          RAD='client/app/src/main/java/com/blackrussia/game/vostok/ui/radial/VostokRadialMenuController.java'
+          BRIDGE='client/app/src/main/java/com/blackrussia/game/vostok/ui/VostokUiBridge.java'
+          CTRL='client/app/src/main/java/com/blackrussia/game/vostok/ui/hud/VostokHudController.java'
+          FLAGS='client/app/src/main/java/com/blackrussia/game/vostok/ui/VostokUiFeatureFlags.java'
+          INTERACT='client/app/src/main/java/com/blackrussia/game/vostok/ui/InteractionUiManager.java'
+          ACT='client/app/src/main/java/com/nvidia/devtech/NvEventQueueActivity.java'
+          SPEED=$(find client/app/src/main/java -name Speedometer.java -print -quit)
+          test -f "$RAD"
+          test -f "$BRIDGE"
+          test -f "$CTRL"
+          test -f "$SPEED"
+          grep -q 'VOSTOK_RADIAL_ENABLED = true' "$FLAGS"
+          grep -q 'VOSTOK_VEHICLE_UI_ENABLED = true' "$FLAGS"
+          grep -q 'registerScreen(VostokUiManager.Screen.RADIAL_MENU, radialMenu)' "$BRIDGE"
+          grep -q 'radialMenu.handleBackInside()' "$BRIDGE"
+          grep -q 'showVostokUiScreen", new Class<?>\[\]{int.class}, 10' "$CTRL"
+          grep -q '"Персонаж"' "$RAD"
+          grep -q '"Документы"' "$RAD"
+          grep -q '"Анимации"' "$RAD"
+          grep -q '"Быстрые действия"' "$RAD"
+          grep -q '"Закрыть меню"' "$RAD"
+          grep -q '"Назад"' "$RAD"
+          grep -q '"Паспорт"' "$RAD"
+          grep -q '"Лицензии"' "$RAD"
+          grep -q '"Медкарта"' "$RAD"
+          grep -q '"Нет игроков рядом"' "$RAD"
+          grep -q 'outerRadius = Math.min(getWidth(), getHeight()) \* 0.30f' "$RAD"
+          grep -q 'command = "/vui_engine"' "$BRIDGE"
+          grep -q 'command = "/vui_lights"' "$BRIDGE"
+          grep -q 'command = "/vui_lock"' "$BRIDGE"
+          grep -q 'setVehicleMode(boolean active)' "$INTERACT"
+          grep -q 'setVostokVehicleMode(true)' "$SPEED"
+          grep -q '~VOSTOK_UI~INTERACT:SHOW:NPC:' 'client/Jni source/jni/chatwindow.cpp'
+          ! grep -q 'mChooseServer' "$ACT"
+
+      - name: Configure Android build
+        working-directory: client
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          Path('build.gradle').write_text('''buildscript {\n    repositories { mavenCentral(); google(); jcenter() }\n    dependencies { classpath 'com.android.tools.build:gradle:8.2.1' }\n}\nallprojects { repositories { mavenCentral(); google(); jcenter(); maven { url "https://jitpack.io" } } }\ntask clean(type: Delete) { delete rootProject.buildDir }\n''')
+          Path('app/build.gradle').write_text('''apply plugin: 'com.android.application'\nandroid {\n    namespace "com.blackrussia.game"\n    compileSdkVersion 30\n    compileOptions { sourceCompatibility 1.8; targetCompatibility 1.8 }\n    defaultConfig { minSdkVersion 17; targetSdkVersion 28; applicationId "com.vostok.roleplay"; versionName "031f-radial-menu"; versionCode 36; vectorDrawables.useSupportLibrary = true; multiDexEnabled = true; ndk { abiFilters 'armeabi-v7a' } }\n}\ndependencies {\n    implementation fileTree(dir: "libs", include: ["*.jar"])\n    implementation 'androidx.appcompat:appcompat:1.1.0'\n    implementation 'com.google.android.material:material:1.0.0'\n    implementation 'com.tuyenmonkey:mkloader:1.4.0'\n    implementation group: 'org.ini4j', name: 'ini4j', version: '0.5.4'\n    implementation 'androidx.constraintlayout:constraintlayout:2.0.4'\n    implementation "com.github.skydoves:colorpickerpreference:2.0.4"\n    implementation 'com.github.Triggertrap:SeekArc:v1.1'\n    implementation 'com.akexorcist:round-corner-progress-bar:2.1.2'\n    implementation 'io.github.dinuscxj:circleprogressbar:1.4.1'\n    implementation 'com.makeramen:roundedimageview:2.3.0'\n    implementation 'com.github.bumptech.glide:glide:4.13.0'\n    annotationProcessor 'com.github.bumptech.glide:compiler:4.13.0'\n    implementation 'com.google.firebase:firebase-database:20.0.4'\n    implementation 'com.github.hzy3774:AndroidP7zip:v1.7.2'\n    implementation 'com.squareup.retrofit2:converter-gson:2.1.0'\n    implementation platform('com.google.firebase:firebase-bom:29.2.1')\n    implementation 'com.liulishuo.filedownloader:library:1.7.7'\n}\n''')
+          p=Path('gradle/wrapper/gradle-wrapper.properties')
+          import re
+          p.write_text(re.sub(r'distributionUrl=.*', 'distributionUrl=https\\://services.gradle.org/distributions/gradle-8.2-bin.zip', p.read_text()))
+          PY
+
+      - name: Install Android SDK
+        run: |
+          yes | ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null || true
+          ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager "platforms;android-30" "build-tools;34.0.0"
+
+      - name: Compile Android resources and Java
+        working-directory: client
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace :app:assembleDebug
+
+      - name: Upload 031F source-check APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: VOSTOK-031F-radial-menu-source-check-apk
+          path: client/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
