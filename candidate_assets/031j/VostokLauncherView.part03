@@ -1,0 +1,140 @@
+    }
+
+    private void drawCharacterCard(Canvas canvas) {
+        drawGlassPanel(canvas, ACCOUNT, 24, Color.argb(222, 20, 20, 20), Color.argb(82, 255, 255, 255));
+        float avatarX = 84.0f, avatarY = 674.0f;
+        uiPaint.setColor(accountAuthenticated ? Color.rgb(255, 112, 42) : Color.rgb(78, 76, 76));
+        canvas.drawCircle(avatarX, avatarY, 35.0f, uiPaint);
+        uiPaint.setColor(Color.rgb(30, 29, 29));
+        canvas.drawCircle(avatarX, avatarY, 31.5f, uiPaint);
+        uiPaint.setTextAlign(Paint.Align.CENTER);
+        uiPaint.setTypeface(uiBold);
+        uiPaint.setTextSize(25.0f);
+        uiPaint.setColor(Color.WHITE);
+        String initial = accountAuthenticated && !selectedCharacterName.isEmpty() ? selectedCharacterName.substring(0, 1).toUpperCase() : "•";
+        float initialBase = avatarY - (uiPaint.ascent() + uiPaint.descent()) * 0.5f;
+        canvas.drawText(initial, avatarX, initialBase, uiPaint);
+        uiPaint.setTextAlign(Paint.Align.LEFT);
+        uiPaint.setTypeface(uiBold);
+        uiPaint.setTextSize(21.0f);
+        uiPaint.setColor(Color.WHITE);
+        String title = !accountAuthenticated ? "НЕ АВТОРИЗОВАН" : selectedCharacterName.isEmpty() ? "НЕТ ПЕРСОНАЖА" : selectedCharacterName.toUpperCase();
+        canvas.drawText(title, 146.0f, 671.0f, uiPaint);
+        uiPaint.setTypeface(uiRegular);
+        uiPaint.setTextSize(16.0f);
+        uiPaint.setColor(Color.argb(205, 200, 196, 192));
+        String subtitle = !accountAuthenticated ? "Нажмите ИГРАТЬ для входа" : selectedCharacterId > 0 ? "ID: " + selectedCharacterId : "Создайте первого персонажа";
+        canvas.drawText(subtitle, 146.0f, 697.0f, uiPaint);
+        RectF control = new RectF(335, 648, 387, 704);
+        uiPaint.setColor(Color.argb(190, 53, 49, 48));
+        canvas.drawRoundRect(control, 14, 14, uiPaint);
+        uiPaint.setStyle(Paint.Style.STROKE);
+        uiPaint.setStrokeWidth(3);
+        uiPaint.setStrokeCap(Paint.Cap.ROUND);
+        uiPaint.setColor(Color.argb(235, 235, 230, 226));
+        if (accountAuthenticated && !characters.isEmpty()) {
+            float cy = control.centerY(), cx = control.centerX();
+            if (characterPanelProgress > 0.5f) {
+                canvas.drawLine(cx - 8, cy + 4, cx, cy - 4, uiPaint);
+                canvas.drawLine(cx, cy - 4, cx + 8, cy + 4, uiPaint);
+            } else {
+                canvas.drawLine(cx - 8, cy - 4, cx, cy + 4, uiPaint);
+                canvas.drawLine(cx, cy + 4, cx + 8, cy - 4, uiPaint);
+            }
+        } else {
+            canvas.drawCircle(control.centerX(), control.centerY(), 4, uiPaint);
+        }
+        uiPaint.setStrokeCap(Paint.Cap.BUTT);
+        uiPaint.setStyle(Paint.Style.FILL);
+    }
+
+    private void drawCharacterPanel(Canvas canvas) {
+        if (characterPanelProgress <= 0.001f || characters.isEmpty()) return;
+        int visibleCount = Math.min(characters.size(), CHARACTER_PANEL_MAX_VISIBLE);
+        float panelHeight = visibleCount * CHARACTER_ROW_HEIGHT + 18;
+        float panelBottom = ACCOUNT.top - CHARACTER_PANEL_GAP, panelTop = panelBottom - panelHeight;
+        RectF panel = new RectF(34, panelTop, 458, panelBottom);
+        float translateY = (1 - characterPanelProgress) * (panelHeight + CHARACTER_PANEL_GAP);
+        int alpha = Math.max(0, Math.min(255, (int) (characterPanelProgress * 255)));
+        canvas.save();
+        canvas.clipRect(0, 180, 520, ACCOUNT.top - 2);
+        canvas.translate(0, translateY);
+        drawGlassPanel(canvas, panel, 22, Color.argb((int) (235 * alpha / 255f), 24, 21, 20), Color.argb((int) (105 * alpha / 255f), 255, 154, 105));
+        float rowTop = panelTop + 9;
+        for (int i = 0; i < visibleCount; i++) {
+            AccountApi.CharacterInfo c = characters.get(i);
+            RectF row = new RectF(panel.left + 9, rowTop, panel.right - 9, rowTop + CHARACTER_ROW_HEIGHT - 5);
+            boolean selected = c.id == selectedCharacterId;
+            uiPaint.setColor(selected ? Color.argb((int) (190 * alpha / 255f), 104, 46, 21) : Color.argb((int) (185 * alpha / 255f), 42, 38, 36));
+            canvas.drawRoundRect(row, 15, 15, uiPaint);
+            if (selected) {
+                uiPaint.setStyle(Paint.Style.STROKE);
+                uiPaint.setStrokeWidth(1.8f);
+                uiPaint.setColor(Color.argb(alpha, 255, 111, 39));
+                canvas.drawRoundRect(row, 15, 15, uiPaint);
+                uiPaint.setStyle(Paint.Style.FILL);
+            }
+            float ax = row.left + 42, ay = row.centerY();
+            uiPaint.setColor(selected ? Color.argb(alpha, 255, 111, 39) : Color.argb(alpha, 106, 101, 98));
+            canvas.drawCircle(ax, ay, 25, uiPaint);
+            uiPaint.setColor(Color.argb(alpha, 31, 29, 29));
+            canvas.drawCircle(ax, ay, 22, uiPaint);
+            uiPaint.setTextAlign(Paint.Align.CENTER);
+            uiPaint.setTypeface(uiBold);
+            uiPaint.setTextSize(18);
+            uiPaint.setColor(Color.argb(alpha, 255, 255, 255));
+            String ini = c.name.isEmpty() ? "?" : c.name.substring(0, 1).toUpperCase();
+            float base = ay - (uiPaint.ascent() + uiPaint.descent()) * .5f;
+            canvas.drawText(ini, ax, base, uiPaint);
+            uiPaint.setTextAlign(Paint.Align.LEFT);
+            uiPaint.setTypeface(uiBold);
+            uiPaint.setTextSize(19);
+            canvas.drawText(c.name.toUpperCase(), row.left + 82, row.top + 25, uiPaint);
+            uiPaint.setTypeface(uiRegular);
+            uiPaint.setTextSize(14);
+            uiPaint.setColor(Color.argb((int) (210 * alpha / 255f), 206, 201, 198));
+            canvas.drawText("ID: " + c.id + "   •   LVL " + c.level, row.left + 82, row.top + 47, uiPaint);
+            uiPaint.setStyle(Paint.Style.STROKE);
+            uiPaint.setStrokeWidth(2);
+            uiPaint.setColor(selected ? Color.argb(alpha, 255, 111, 39) : Color.argb((int) (165 * alpha / 255f), 200, 195, 191));
+            canvas.drawCircle(row.right - 28, row.centerY(), 10, uiPaint);
+            if (selected) {
+                uiPaint.setStyle(Paint.Style.FILL);
+                canvas.drawCircle(row.right - 28, row.centerY(), 5, uiPaint);
+            }
+            uiPaint.setStyle(Paint.Style.FILL);
+            rowTop += CHARACTER_ROW_HEIGHT;
+        }
+        canvas.restore();
+    }
+
+    private void drawGlassPanel(Canvas canvas, RectF rect, float radius, int fillColor, int strokeColor) {
+        uiPaint.setShader(new LinearGradient(rect.left, rect.top, rect.left, rect.bottom,
+                brighten(fillColor, 12), fillColor, Shader.TileMode.CLAMP));
+        canvas.drawRoundRect(rect, radius, radius, uiPaint);
+        uiPaint.setShader(null);
+        uiPaint.setStyle(Paint.Style.STROKE);
+        uiPaint.setStrokeWidth(1.4f);
+        uiPaint.setColor(strokeColor);
+        canvas.drawRoundRect(rect, radius, radius, uiPaint);
+        uiPaint.setStyle(Paint.Style.FILL);
+    }
+
+    private int brighten(int color, int amount) {
+        int a = Color.alpha(color);
+        int r = Math.min(255, Color.red(color) + amount);
+        int g = Math.min(255, Color.green(color) + amount);
+        int b = Math.min(255, Color.blue(color) + amount);
+        return Color.argb(a, r, g, b);
+    }
+
+    private void drawIcon(Canvas canvas, Drawable icon, float x, float y, float w, float h, int alpha) {
+        if (icon == null) return;
+        int left = Math.round(x);
+        int top = Math.round(y);
+        icon.setBounds(left, top, Math.round(x + w), Math.round(y + h));
+        icon.setAlpha(alpha);
+        icon.draw(canvas);
+    }
+
+    private void drawText(Canvas canvas, String text, float x, float y, float size, Typeface typeface, int color, Paint.Align align) {
