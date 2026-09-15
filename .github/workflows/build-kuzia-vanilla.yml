@@ -20,7 +20,7 @@ jobs:
           path: kuzia
           persist-credentials: false
 
-      - name: Apply build and startup compatibility fixes
+      - name: Apply build and John-cache experiment patches
         shell: bash
         run: |
           set -euxo pipefail
@@ -33,31 +33,354 @@ jobs:
             kuzia/app/src/main/cpp/samp/game/rgba.cpp
 
           # Upstream README says the GTA 2.11 cache lives in /storage/emulated/0/GTA/,
-          # while this source revision accidentally points GameActivityBase to /VICE/.
-          # Align runtime with the documented cache location.
+          # while this source revision points GameActivityBase to /VICE/.
           sed -i 's#new File(documentsDir, "VICE")#new File(documentsDir, "GTA")#g' \
             kuzia/app/src/main/java/com/rockstargames/oswrapper/GameActivityBase.java
 
-          # Do not enter native GTA when the external GTA 2.11 cache is missing.
-          # The vanilla build previously appeared to "close" immediately because
-          # START launched the native activity even with an empty game directory.
+          # This is an isolated compatibility experiment only. Use the John build's
+          # Firebase project so its Remote Config keys launcher_client/launcher_data
+          # can be queried by this temporary APK. Namespace/source packages stay Kuzia.
+          sed -i 's#applicationId = "com.gta.game"#applicationId = "com.kurdish.roleplay"#g' \
+            kuzia/app/build.gradle.kts
+
+          cat > kuzia/app/google-services.json <<'JSON'
+          {
+            "project_info": {
+              "project_number": "757123888015",
+              "firebase_url": "https://kurdish-roleplay-default-rtdb.firebaseio.com",
+              "project_id": "kurdish-roleplay",
+              "storage_bucket": "kurdish-roleplay.firebasestorage.app"
+            },
+            "client": [
+              {
+                "client_info": {
+                  "mobilesdk_app_id": "1:757123888015:android:009e71fb232e512edf91fa",
+                  "android_client_info": {
+                    "package_name": "com.kurdish.roleplay"
+                  }
+                },
+                "oauth_client": [],
+                "api_key": [
+                  {
+                    "current_key": "AIzaSyCHkpdmVnur8FZwN9636nzpQOhzMLIfGao"
+                  }
+                ],
+                "services": {
+                  "appinvite_service": {
+                    "other_platform_oauth_client": []
+                  }
+                }
+              }
+            ],
+            "configuration_version": "1"
+          }
+          JSON
+
+          # Add a small bootstrap downloader that reads John's current cache endpoints
+          # from Firebase Remote Config, reads John's JSON file manifest and mirrors the
+          # compatible ETC/generic files into Kuzia's documented /storage/emulated/0/GTA/.
+          cat > kuzia/app/src/main/java/com/gta/launcher/activity/JohnCacheBootstrap.java <<'JAVA'
+          package com.gta.launcher.activity;
+
+          import android.app.Activity;
+          import android.util.Log;
+          import android.widget.Button;
+          import android.widget.Toast;
+
+          import com.google.firebase.remoteconfig.FirebaseRemoteConfig;
+          import com.google.firebase.remoteconfig.FirebaseRemoteConfigSettings;
+
+          import org.json.JSONArray;
+          import org.json.JSONObject;
+
+          import java.io.BufferedInputStream;
+          import java.io.BufferedReader;
+          import java.io.File;
+          import java.io.FileOutputStream;
+          import java.io.InputStream;
+          import java.io.InputStreamReader;
+          import java.net.HttpURLConnection;
+          import java.net.URL;
+          import java.nio.charset.StandardCharsets;
+          import java.util.ArrayList;
+          import java.util.List;
+          import java.util.Locale;
+
+          public final class JohnCacheBootstrap {
+              private static final String TAG = "JohnCacheBootstrap";
+              private static final File CACHE_ROOT = new File("/storage/emulated/0/GTA");
+              private static volatile boolean running = false;
+
+              private JohnCacheBootstrap() { }
+
+              public static boolean hasUsableCache() {
+                  File data = new File(CACHE_ROOT, "data");
+                  File models = new File(CACHE_ROOT, "models");
+                  File textures = new File(CACHE_ROOT, "Textures");
+                  File texdb = new File(CACHE_ROOT, "texdb");
+                  return CACHE_ROOT.isDirectory()
+                          && data.isDirectory()
+                          && models.isDirectory()
+                          && (textures.isDirectory() || texdb.isDirectory());
+              }
+
+              public static void ensureCache(Activity activity, Button button, Runnable ready) {
+                  if (hasUsableCache()) {
+                      ready.run();
+                      return;
+                  }
+                  if (running) {
+                      Toast.makeText(activity, "Загрузка кэша уже выполняется", Toast.LENGTH_SHORT).show();
+                      return;
+                  }
+                  running = true;
+                  setButton(activity, button, false, "ПОДГОТОВКА КЭША...");
+                  Toast.makeText(activity, "Пробуем получить кэш GTA 2.11 из источника John", Toast.LENGTH_LONG).show();
+
+                  FirebaseRemoteConfig remote = FirebaseRemoteConfig.getInstance();
+                  FirebaseRemoteConfigSettings settings = new FirebaseRemoteConfigSettings.Builder()
+                          .setMinimumFetchIntervalInSeconds(0)
+                          .build();
+                  remote.setConfigSettingsAsync(settings);
+                  remote.fetchAndActivate().addOnCompleteListener(activity, task -> {
+                      if (!task.isSuccessful()) {
+                          fail(activity, button, "Remote Config John недоступен");
+                          return;
+                      }
+
+                      final String launcherClient = remote.getString("launcher_client");
+                      final String launcherData = remote.getString("launcher_data");
+                      Log.i(TAG, "launcher_client=" + launcherClient);
+                      Log.i(TAG, "launcher_data=" + launcherData);
+
+                      if (!isHttp(launcherClient) || !isHttp(launcherData)) {
+                          fail(activity, button, "John не отдал ссылки launcher_client/launcher_data");
+                          return;
+                      }
+
+                      new Thread(() -> {
+                          try {
+                              String clientJson = readText(launcherClient);
+                              JSONObject clientConfig = new JSONObject(clientJson).getJSONObject("client_config");
+                              String manifestUrl = clientConfig.getString("url_cache_files");
+                              if (!isHttp(manifestUrl)) {
+                                  throw new IllegalStateException("url_cache_files is empty");
+                              }
+
+                              String manifestJson = readText(manifestUrl);
+                              JSONArray array = new JSONObject(manifestJson).getJSONArray("files");
+                              List<Entry> entries = new ArrayList<>();
+                              long totalBytes = 0L;
+
+                              for (int i = 0; i < array.length(); i++) {
+                                  JSONObject o = array.getJSONObject(i);
+                                  String name = o.optString("name", "");
+                                  String path = o.optString("path", "");
+                                  String url = o.optString("url", "");
+                                  long size = o.optLong("size", -1L);
+                                  if (!wanted(name, path)) continue;
+
+                                  File target = safeTarget(path, name);
+                                  if (target.exists() && size >= 0 && target.length() == size) continue;
+
+                                  String remoteUrl = isHttp(url) ? url : joinUrl(launcherData, path);
+                                  entries.add(new Entry(name, path, remoteUrl, size, target));
+                                  if (size > 0) totalBytes += size;
+                              }
+
+                              if (!CACHE_ROOT.exists() && !CACHE_ROOT.mkdirs()) {
+                                  throw new IllegalStateException("Cannot create " + CACHE_ROOT);
+                              }
+
+                              final long total = totalBytes;
+                              long done = 0L;
+                              for (int i = 0; i < entries.size(); i++) {
+                                  Entry e = entries.get(i);
+                                  final int index = i + 1;
+                                  final int count = entries.size();
+                                  final long completedBefore = done;
+                                  activity.runOnUiThread(() -> setButton(activity, button, false,
+                                          "КЭШ " + index + "/" + count));
+                                  download(e.url, e.target, e.size, bytes -> {
+                                      if (total > 0) {
+                                          long all = completedBefore + bytes;
+                                          int percent = (int) Math.min(99L, all * 100L / total);
+                                          if (percent % 5 == 0) {
+                                              activity.runOnUiThread(() -> button.setText("КЭШ " + percent + "%"));
+                                          }
+                                      }
+                                  });
+                                  if (e.size > 0) done += e.size;
+                              }
+
+                              if (!hasUsableCache()) {
+                                  throw new IllegalStateException("John manifest downloaded, but GTA base folders are incomplete");
+                              }
+
+                              running = false;
+                              activity.runOnUiThread(() -> {
+                                  setButton(activity, button, true, "START!");
+                                  Toast.makeText(activity, "Кэш загружен. Запускаем GTA.", Toast.LENGTH_LONG).show();
+                                  ready.run();
+                              });
+                          } catch (Throwable t) {
+                              Log.e(TAG, "Cache bootstrap failed", t);
+                              fail(activity, button, "Ошибка кэша John: " + t.getClass().getSimpleName() + ": " + safeMessage(t));
+                          }
+                      }, "john-cache-bootstrap").start();
+                  });
+              }
+
+              private static boolean wanted(String name, String path) {
+                  String n = name.toLowerCase(Locale.ROOT);
+                  String p = path.toLowerCase(Locale.ROOT);
+                  if (n.equals("samp_log.txt") || n.equals("svlog.txt") || n.equals("gtasatelem.set")
+                          || n.equals("gtasamp10.b") || n.equals(".htaccess") || n.equals("gta_sa.set")
+                          || n.equals("settings.ini")) return false;
+
+                  // John publishes GPU-specific texture variants. ETC is the safest
+                  // common Android test path; generic files are always retained.
+                  if (p.contains(".dxt.") || p.contains(".pvr.")) return false;
+                  return true;
+              }
+
+              private static File safeTarget(String path, String name) throws Exception {
+                  String relative = path == null ? "" : path.replace('\\', '/');
+                  while (relative.startsWith("/")) relative = relative.substring(1);
+                  if (relative.endsWith("/")) relative += name;
+                  File target = new File(CACHE_ROOT, relative);
+                  String root = CACHE_ROOT.getCanonicalPath() + File.separator;
+                  String canonical = target.getCanonicalPath();
+                  if (!canonical.startsWith(root)) throw new SecurityException("Unsafe cache path: " + path);
+                  return target;
+              }
+
+              private static String readText(String url) throws Exception {
+                  HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+                  c.setConnectTimeout(20000);
+                  c.setReadTimeout(30000);
+                  c.setInstanceFollowRedirects(true);
+                  c.setRequestProperty("User-Agent", "VOSTOK-Kuzia-Cache-Test/1.0");
+                  try {
+                      int code = c.getResponseCode();
+                      if (code < 200 || code >= 300) throw new IllegalStateException("HTTP " + code + " for " + url);
+                      try (BufferedReader r = new BufferedReader(new InputStreamReader(c.getInputStream(), StandardCharsets.UTF_8))) {
+                          StringBuilder b = new StringBuilder();
+                          String line;
+                          while ((line = r.readLine()) != null) b.append(line).append('\n');
+                          return b.toString();
+                      }
+                  } finally {
+                      c.disconnect();
+                  }
+              }
+
+              private interface Progress { void onBytes(long bytes); }
+
+              private static void download(String url, File target, long expected, Progress progress) throws Exception {
+                  File parent = target.getParentFile();
+                  if (parent != null && !parent.exists() && !parent.mkdirs()) {
+                      throw new IllegalStateException("Cannot create " + parent);
+                  }
+                  File part = new File(target.getAbsolutePath() + ".part");
+                  if (part.exists()) part.delete();
+
+                  HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+                  c.setConnectTimeout(20000);
+                  c.setReadTimeout(60000);
+                  c.setInstanceFollowRedirects(true);
+                  c.setRequestProperty("User-Agent", "VOSTOK-Kuzia-Cache-Test/1.0");
+                  long written = 0L;
+                  try {
+                      int code = c.getResponseCode();
+                      if (code < 200 || code >= 300) throw new IllegalStateException("HTTP " + code + " for " + url);
+                      try (InputStream in = new BufferedInputStream(c.getInputStream());
+                           FileOutputStream out = new FileOutputStream(part)) {
+                          byte[] buf = new byte[1024 * 128];
+                          int n;
+                          while ((n = in.read(buf)) >= 0) {
+                              out.write(buf, 0, n);
+                              written += n;
+                              progress.onBytes(written);
+                          }
+                          out.getFD().sync();
+                      }
+                  } finally {
+                      c.disconnect();
+                  }
+
+                  if (expected >= 0 && written != expected) {
+                      part.delete();
+                      throw new IllegalStateException("Size mismatch for " + target.getName() + ": " + written + "/" + expected);
+                  }
+                  if (target.exists() && !target.delete()) {
+                      throw new IllegalStateException("Cannot replace " + target);
+                  }
+                  if (!part.renameTo(target)) {
+                      throw new IllegalStateException("Cannot finalize " + target);
+                  }
+              }
+
+              private static String joinUrl(String base, String path) {
+                  if (base.endsWith("/") && path.startsWith("/")) return base + path.substring(1);
+                  if (!base.endsWith("/") && !path.startsWith("/")) return base + "/" + path;
+                  return base + path;
+              }
+
+              private static boolean isHttp(String s) {
+                  return s != null && (s.startsWith("https://") || s.startsWith("http://"));
+              }
+
+              private static void fail(Activity activity, Button button, String message) {
+                  running = false;
+                  Log.e(TAG, message);
+                  activity.runOnUiThread(() -> {
+                      setButton(activity, button, true, "START!");
+                      Toast.makeText(activity, message, Toast.LENGTH_LONG).show();
+                  });
+              }
+
+              private static String safeMessage(Throwable t) {
+                  String m = t.getMessage();
+                  return m == null ? "без описания" : m;
+              }
+
+              private static void setButton(Activity activity, Button button, boolean enabled, String text) {
+                  button.setEnabled(enabled);
+                  button.setText(text);
+              }
+
+              private static final class Entry {
+                  final String name;
+                  final String path;
+                  final String url;
+                  final long size;
+                  final File target;
+
+                  Entry(String name, String path, String url, long size, File target) {
+                      this.name = name;
+                      this.path = path;
+                      this.url = url;
+                      this.size = size;
+                      this.target = target;
+                  }
+              }
+          }
+          JAVA
+
+          # Route START through the bootstrap only when no usable /GTA cache exists.
           python3 - <<'PY'
           from pathlib import Path
 
           p = Path('kuzia/app/src/main/java/com/gta/launcher/activity/MainActivity.java')
           s = p.read_text(encoding='utf-8')
 
-          if 'import java.io.File;' not in s:
-              marker = 'import androidx.core.content.ContextCompat;\n'
-              s = s.replace(marker, marker + '\nimport java.io.File;\n')
-
           old = '''    private void startGame() {\n        try {\n            Log.d("MainActivity", "Starting game");\n            Intent gameIntent = new Intent(MainActivity.this, SAMP.class);\n            startActivity(gameIntent);\n        } catch (Exception e) {\n            Log.e("MainActivity", "Error starting game: " + e.getMessage());\n        }\n    }\n'''
 
-          new = '''    private boolean hasGameCache() {\n        File gameDir = new File("/storage/emulated/0/GTA");\n        File dataDir = new File(gameDir, "data");\n        File modelsDir = new File(gameDir, "models");\n        File texdbDir = new File(gameDir, "texdb");\n        return gameDir.isDirectory()\n                && dataDir.isDirectory()\n                && modelsDir.isDirectory()\n                && texdbDir.isDirectory();\n    }\n\n    private void startGame() {\n        try {\n            if (!hasGameCache()) {\n                Log.e("MainActivity", "GTA 2.11 cache missing at /storage/emulated/0/GTA/");\n                Toast.makeText(this,\n                        "Кэш GTA 2.11 не найден. Ожидается папка /storage/emulated/0/GTA/",\n                        Toast.LENGTH_LONG).show();\n                return;\n            }\n\n            Log.d("MainActivity", "Starting game with cache /storage/emulated/0/GTA/");\n            Intent gameIntent = new Intent(MainActivity.this, SAMP.class);\n            startActivity(gameIntent);\n        } catch (Exception e) {\n            Log.e("MainActivity", "Error starting game: " + e.getMessage(), e);\n            Toast.makeText(this, "Ошибка запуска игры: " + e.getClass().getSimpleName(), Toast.LENGTH_LONG).show();\n        }\n    }\n'''
+          new = '''    private void launchNativeGame() {\n        try {\n            Log.d("MainActivity", "Starting game with /storage/emulated/0/GTA/");\n            Intent gameIntent = new Intent(MainActivity.this, SAMP.class);\n            startActivity(gameIntent);\n        } catch (Exception e) {\n            Log.e("MainActivity", "Error starting game: " + e.getMessage(), e);\n            Toast.makeText(this, "Ошибка запуска игры: " + e.getClass().getSimpleName(), Toast.LENGTH_LONG).show();\n        }\n    }\n\n    private void startGame() {\n        if (JohnCacheBootstrap.hasUsableCache()) {\n            launchNativeGame();\n            return;\n        }\n        JohnCacheBootstrap.ensureCache(this, startButton, this::launchNativeGame);\n    }\n'''
 
           if old not in s:
               raise SystemExit('startGame() block not found; upstream changed')
-
           s = s.replace(old, new)
           p.write_text(s, encoding='utf-8')
           PY
@@ -65,7 +388,6 @@ jobs:
           # BASS/BASS SSL are already linked from CMake vendor/bass/libs and AGP
           # packages those linked shared objects. Upstream also places copies in
           # jniLibs, which causes mergeDebugNativeLibs duplicate-path failure.
-          # Keep the CMake-linked copies so runtime matches what libsamp links to.
           rm -f kuzia/app/src/main/jniLibs/arm64-v8a/libbass.so
           rm -f kuzia/app/src/main/jniLibs/arm64-v8a/libbass_ssl.so
 
@@ -93,7 +415,7 @@ jobs:
             "ndk;26.2.11394342" \
             "cmake;3.22.1"
 
-      - name: Build vanilla debug APK
+      - name: Build John-cache experiment debug APK
         working-directory: kuzia
         shell: bash
         run: |
@@ -106,11 +428,11 @@ jobs:
         run: |
           find kuzia/app/build/outputs -maxdepth 6 -type f 2>/dev/null | sort || true
 
-      - name: Upload vanilla APK
+      - name: Upload experiment APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: KUZIA_GTA_2_11_VANILLA_DEBUG
+          name: KUZIA_WITH_JOHN_CACHE_EXPERIMENT
           path: kuzia/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 7
