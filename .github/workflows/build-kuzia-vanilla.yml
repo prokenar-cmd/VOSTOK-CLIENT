@@ -20,6 +20,15 @@ jobs:
           path: kuzia
           persist-credentials: false
 
+      - name: Apply Linux case-sensitivity compatibility fix
+        shell: bash
+        run: |
+          set -euxo pipefail
+          # Upstream GTA-2.11 references playerTabList.h, while the actual file
+          # is named playertablist.h. Windows hides this; Linux CI does not.
+          sed -i 's#samp_widgets/playerTabList.h#samp_widgets/playertablist.h#g' \
+            kuzia/app/src/main/cpp/samp/gui/gui.h
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
