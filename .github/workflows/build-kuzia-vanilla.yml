@@ -1,9 +1,9 @@
-name: Build Kuzia GTA 2.11 Vanilla
+name: Build Kuzia + Gold Crime Cache Test
 
 on:
   push:
     branches:
-      - experiment-kuzia-vanilla
+      - experiment-kuzia-goldcrime-cache
   workflow_dispatch:
 
 jobs:
@@ -20,52 +20,168 @@ jobs:
           path: kuzia
           persist-credentials: false
 
-      - name: Apply build and startup compatibility fixes
+      - name: Apply build and Gold Crime cache autodetect patches
         shell: bash
         run: |
           set -euxo pipefail
 
           # Upstream was developed on case-insensitive Windows; Linux CI exposes
-          # two filename-case mismatches. These changes do not alter client logic.
+          # two filename-case mismatches. These do not alter client logic.
           sed -i 's#samp_widgets/playerTabList.h#samp_widgets/playertablist.h#g' \
             kuzia/app/src/main/cpp/samp/gui/gui.h
           sed -i 's#"RGBA.h"#"rgba.h"#g' \
             kuzia/app/src/main/cpp/samp/game/rgba.cpp
 
-          # Upstream README says the GTA 2.11 cache lives in /storage/emulated/0/GTA/,
-          # while this source revision accidentally points GameActivityBase to /VICE/.
-          # Align runtime with the documented cache location.
-          sed -i 's#new File(documentsDir, "VICE")#new File(documentsDir, "GTA")#g' \
-            kuzia/app/src/main/java/com/rockstargames/oswrapper/GameActivityBase.java
+          # Experimental locator: find a modern Gold Russia / Crime Mobile style
+          # cache already downloaded by the official launcher. The old BlackRussia
+          # cache is explicitly excluded so this A/B test cannot silently reuse it.
+          cat > kuzia/app/src/main/java/com/gta/launcher/activity/CacheLocator.java <<'JAVA'
+          package com.gta.launcher.activity;
 
-          # Do not enter native GTA when the external GTA 2.11 cache is missing.
-          # The vanilla build previously appeared to "close" immediately because
-          # START launched the native activity even with an empty game directory.
+          import android.content.Context;
+          import java.io.File;
+          import java.util.ArrayDeque;
+          import java.util.HashSet;
+          import java.util.Locale;
+          import java.util.Set;
+
+          public final class CacheLocator {
+              private static final String PREFS = "vostok_cache_test";
+              private static final String KEY = "base_path";
+              private static final String FALLBACK = "/storage/emulated/0/GTA";
+
+              private CacheLocator() { }
+
+              public static String getSelectedPath(Context context) {
+                  return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                          .getString(KEY, FALLBACK);
+              }
+
+              public static File findAndSave(Context context) {
+                  String[] preferred = new String[] {
+                          "/storage/emulated/0/GoldRussia",
+                          "/storage/emulated/0/Gold Russia",
+                          "/storage/emulated/0/CrimeMobile",
+                          "/storage/emulated/0/Crime Mobile",
+                          "/storage/emulated/0/Crime",
+                          "/storage/emulated/0/Rublevka",
+                          "/storage/emulated/0/Android/media/com.varfa.game",
+                          "/storage/emulated/0/Android/media/com.goldrussia.game",
+                          "/storage/emulated/0/Android/media/ru.goldrussia.game"
+                  };
+
+                  for (String path : preferred) {
+                      File f = new File(path);
+                      if (isCandidate(f)) return save(context, f);
+                  }
+
+                  File found = scan(new File("/storage/emulated/0/Android/media"), 4, 5000);
+                  if (found == null) {
+                      found = scan(new File("/storage/emulated/0"), 3, 5000);
+                  }
+                  return found == null ? null : save(context, found);
+              }
+
+              private static File save(Context context, File dir) {
+                  context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                          .edit().putString(KEY, dir.getAbsolutePath()).apply();
+                  return dir;
+              }
+
+              private static boolean isCandidate(File dir) {
+                  if (dir == null || !dir.isDirectory()) return false;
+                  String path = dir.getAbsolutePath().toLowerCase(Locale.ROOT);
+                  if (path.contains("blackrussia") || path.contains("vostok_crime_map_test")) {
+                      return false;
+                  }
+                  File data = new File(dir, "data");
+                  File texdb = new File(dir, "texdb");
+                  if (!data.isDirectory() || !texdb.isDirectory()) return false;
+
+                  File models = new File(dir, "models");
+                  File samp = new File(dir, "SAMP");
+                  File gta3 = new File(texdb, "gta3");
+                  File gta3Img = new File(texdb, "gta3.img");
+                  return models.isDirectory() || samp.isDirectory()
+                          || gta3.isDirectory() || gta3Img.isFile();
+              }
+
+              private static File scan(File root, int maxDepth, int maxVisited) {
+                  if (root == null || !root.isDirectory()) return null;
+                  ArrayDeque<Node> queue = new ArrayDeque<>();
+                  Set<String> seen = new HashSet<>();
+                  queue.add(new Node(root, 0));
+                  int visited = 0;
+
+                  while (!queue.isEmpty() && visited < maxVisited) {
+                      Node n = queue.removeFirst();
+                      File dir = n.file;
+                      String path = dir.getAbsolutePath();
+                      if (!seen.add(path)) continue;
+                      visited++;
+
+                      if (isCandidate(dir)) return dir;
+                      if (n.depth >= maxDepth) continue;
+
+                      File[] children;
+                      try {
+                          children = dir.listFiles(File::isDirectory);
+                      } catch (Throwable ignored) {
+                          children = null;
+                      }
+                      if (children == null) continue;
+                      for (File child : children) {
+                          String lower = child.getAbsolutePath().toLowerCase(Locale.ROOT);
+                          if (lower.contains("blackrussia")) continue;
+                          queue.addLast(new Node(child, n.depth + 1));
+                      }
+                  }
+                  return null;
+              }
+
+              private static final class Node {
+                  final File file;
+                  final int depth;
+                  Node(File file, int depth) {
+                      this.file = file;
+                      this.depth = depth;
+                  }
+              }
+          }
+          JAVA
+
+          # Make the Rockstar wrapper use the path selected by CacheLocator.
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('kuzia/app/src/main/java/com/rockstargames/oswrapper/GameActivityBase.java')
+          s = p.read_text(encoding='utf-8')
+          old = '''    public String GetGameBaseDirectory() {\n        // Standard path: /storage/emulated/0/Documents/SampMobile/\n        File documentsDir = new File("/storage/emulated/0/");\n        File gameDir = new File(documentsDir, "VICE");\n\n        try {\n            if (!gameDir.exists()) {\n                boolean created = gameDir.mkdirs();\n\n            }\n            return gameDir.getAbsolutePath() + "/";\n        } catch (Exception e) {\n\n            return "";\n        }\n    }\n'''
+          new = '''    public String GetGameBaseDirectory() {\n        String selected = com.gta.launcher.activity.CacheLocator.getSelectedPath(this);\n        File gameDir = new File(selected);\n        try {\n            return gameDir.getAbsolutePath() + "/";\n        } catch (Exception e) {\n            return "";\n        }\n    }\n'''
+          if old not in s:
+              raise SystemExit('GetGameBaseDirectory block not found')
+          p.write_text(s.replace(old, new), encoding='utf-8')
+          PY
+
+          # Route START through cache autodetection. We intentionally do not copy,
+          # rename or modify the donor cache in this experiment.
           python3 - <<'PY'
           from pathlib import Path
 
           p = Path('kuzia/app/src/main/java/com/gta/launcher/activity/MainActivity.java')
           s = p.read_text(encoding='utf-8')
-
           if 'import java.io.File;' not in s:
               marker = 'import androidx.core.content.ContextCompat;\n'
               s = s.replace(marker, marker + '\nimport java.io.File;\n')
 
           old = '''    private void startGame() {\n        try {\n            Log.d("MainActivity", "Starting game");\n            Intent gameIntent = new Intent(MainActivity.this, SAMP.class);\n            startActivity(gameIntent);\n        } catch (Exception e) {\n            Log.e("MainActivity", "Error starting game: " + e.getMessage());\n        }\n    }\n'''
-
-          new = '''    private boolean hasGameCache() {\n        File gameDir = new File("/storage/emulated/0/GTA");\n        File dataDir = new File(gameDir, "data");\n        File modelsDir = new File(gameDir, "models");\n        File texdbDir = new File(gameDir, "texdb");\n        return gameDir.isDirectory()\n                && dataDir.isDirectory()\n                && modelsDir.isDirectory()\n                && texdbDir.isDirectory();\n    }\n\n    private void startGame() {\n        try {\n            if (!hasGameCache()) {\n                Log.e("MainActivity", "GTA 2.11 cache missing at /storage/emulated/0/GTA/");\n                Toast.makeText(this,\n                        "Кэш GTA 2.11 не найден. Ожидается папка /storage/emulated/0/GTA/",\n                        Toast.LENGTH_LONG).show();\n                return;\n            }\n\n            Log.d("MainActivity", "Starting game with cache /storage/emulated/0/GTA/");\n            Intent gameIntent = new Intent(MainActivity.this, SAMP.class);\n            startActivity(gameIntent);\n        } catch (Exception e) {\n            Log.e("MainActivity", "Error starting game: " + e.getMessage(), e);\n            Toast.makeText(this, "Ошибка запуска игры: " + e.getClass().getSimpleName(), Toast.LENGTH_LONG).show();\n        }\n    }\n'''
-
+          new = '''    private void startGame() {\n        try {\n            File cache = CacheLocator.findAndSave(this);\n            if (cache == null) {\n                Toast.makeText(this,\n                        "Современный CRMP-кэш не найден. Сначала скачайте кэш через официальный Crime/Gold launcher.",\n                        Toast.LENGTH_LONG).show();\n                return;\n            }\n\n            Log.d("MainActivity", "Starting Kuzia with detected cache: " + cache.getAbsolutePath());\n            Toast.makeText(this,\n                    "CRMP-кэш найден: " + cache.getAbsolutePath(),\n                    Toast.LENGTH_LONG).show();\n            Intent gameIntent = new Intent(MainActivity.this, SAMP.class);\n            startActivity(gameIntent);\n        } catch (Exception e) {\n            Log.e("MainActivity", "Error starting game: " + e.getMessage(), e);\n            Toast.makeText(this, "Ошибка запуска игры: " + e.getClass().getSimpleName(), Toast.LENGTH_LONG).show();\n        }\n    }\n'''
           if old not in s:
-              raise SystemExit('startGame() block not found; upstream changed')
-
-          s = s.replace(old, new)
-          p.write_text(s, encoding='utf-8')
+              raise SystemExit('startGame block not found')
+          p.write_text(s.replace(old, new), encoding='utf-8')
           PY
 
-          # BASS/BASS SSL are already linked from CMake vendor/bass/libs and AGP
-          # packages those linked shared objects. Upstream also places copies in
-          # jniLibs, which causes mergeDebugNativeLibs duplicate-path failure.
-          # Keep the CMake-linked copies so runtime matches what libsamp links to.
+          # Upstream duplicates BASS libraries through CMake and jniLibs on Linux.
           rm -f kuzia/app/src/main/jniLibs/arm64-v8a/libbass.so
           rm -f kuzia/app/src/main/jniLibs/arm64-v8a/libbass_ssl.so
 
@@ -93,7 +209,7 @@ jobs:
             "ndk;26.2.11394342" \
             "cmake;3.22.1"
 
-      - name: Build vanilla debug APK
+      - name: Build Gold Crime cache test APK
         working-directory: kuzia
         shell: bash
         run: |
@@ -106,11 +222,11 @@ jobs:
         run: |
           find kuzia/app/build/outputs -maxdepth 6 -type f 2>/dev/null | sort || true
 
-      - name: Upload vanilla APK
+      - name: Upload Gold Crime cache test APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: KUZIA_GTA_2_11_VANILLA_DEBUG
+          name: KUZIA_GOLDCRIME_CACHE_AUTODETECT
           path: kuzia/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 7
