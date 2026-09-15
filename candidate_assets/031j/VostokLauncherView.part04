@@ -1,0 +1,97 @@
+        uiPaint.setShader(null);
+        uiPaint.setTypeface(typeface);
+        uiPaint.setTextSize(size);
+        uiPaint.setColor(color);
+        uiPaint.setTextAlign(align);
+        canvas.drawText(text, x, y, uiPaint);
+    }
+
+    private void drawMultiline(Canvas canvas, String text, float x, float y, float size, float lineHeight, Typeface typeface, int color) {
+        String[] lines = text.split("\\n");
+        for (int i = 0; i < lines.length; i++) {
+            drawText(canvas, lines[i], x, y + i * lineHeight, size, typeface, color, Paint.Align.LEFT);
+        }
+    }
+
+    private void drawSpacedText(Canvas canvas, String text, float x, float y, float size, float spacing, Typeface typeface, int color) {
+        uiPaint.setTypeface(typeface);
+        uiPaint.setTextSize(size);
+        uiPaint.setColor(color);
+        uiPaint.setTextAlign(Paint.Align.LEFT);
+        float cursor = x;
+        for (int i = 0; i < text.length(); i++) {
+            String ch = String.valueOf(text.charAt(i));
+            canvas.drawText(ch, cursor, y, uiPaint);
+            cursor += uiPaint.measureText(ch) + spacing;
+        }
+    }
+
+    private void toggleCharacterPanel() { if (!accountAuthenticated || characters.isEmpty()) return; if (characterPanelOpen) closeCharacterPanel(true); else openCharacterPanel(); }
+    private void openCharacterPanel() { characterPanelOpen = true; animateCharacterPanelTo(1f); }
+    private void closeCharacterPanel(boolean animate) { characterPanelOpen = false; if (characterPanelAnimator != null) characterPanelAnimator.cancel(); if (!animate) { characterPanelProgress = 0; invalidate(); return; } animateCharacterPanelTo(0f); }
+    private void animateCharacterPanelTo(float target) { if (characterPanelAnimator != null) characterPanelAnimator.cancel(); characterPanelAnimator = ValueAnimator.ofFloat(characterPanelProgress, target); characterPanelAnimator.setDuration(220); characterPanelAnimator.setInterpolator(new DecelerateInterpolator()); characterPanelAnimator.addUpdateListener(a -> { characterPanelProgress = (Float) a.getAnimatedValue(); invalidate(); }); characterPanelAnimator.start(); }
+
+    @Override public boolean onTouchEvent(MotionEvent event) {
+        if (event.getActionMasked() != MotionEvent.ACTION_UP) return true;
+        float x = (event.getX() - uiLeft) / uiScale;
+        float y = (event.getY() - uiTop) / uiScale;
+        if (characterPanelProgress > 0.85f && !characters.isEmpty()) {
+            long id = hitCharacterPanel(x, y);
+            if (id > 0) {
+                setSelectedCharacter(id);
+                if (characterSelectionListener != null) characterSelectionListener.onCharacterSelected(id);
+                performClick();
+                return true;
+            }
+        }
+        if (ACCOUNT.contains(x, y)) {
+            performClick();
+            if (accountAuthenticated && !characters.isEmpty()) toggleCharacterPanel();
+            else if (listener != null) listener.onLauncherAction(Action.ACCOUNT);
+            return true;
+        }
+        if (isCharacterPanelOpen()) closeCharacterPanel(true);
+        Action action = hitTest(x, y);
+        if (action != null && listener != null) {
+            performClick();
+            listener.onLauncherAction(action);
+        }
+        return true;
+    }
+
+    @Override public boolean performClick() { super.performClick(); return true; }
+
+    private long hitCharacterPanel(float x, float y) {
+        int n = Math.min(characters.size(), CHARACTER_PANEL_MAX_VISIBLE);
+        float ph = n * CHARACTER_ROW_HEIGHT + 18, pb = ACCOUNT.top - CHARACTER_PANEL_GAP, pt = pb - ph;
+        RectF p = new RectF(34, pt, 458, pb);
+        if (!p.contains(x, y)) return 0;
+        int idx = (int) ((y - (pt + 9)) / CHARACTER_ROW_HEIGHT);
+        return idx >= 0 && idx < n ? characters.get(idx).id : 0;
+    }
+
+    private Action hitTest(float x, float y) {
+        if (PLAY.contains(x, y)) return Action.PLAY;
+        if (SERVER.contains(x, y)) return Action.SERVER;
+        if (SITE.contains(x, y)) return Action.SITE;
+        if (VK.contains(x, y)) return Action.VK;
+        if (TELEGRAM.contains(x, y)) return Action.TELEGRAM;
+        if (SUPPORT.contains(x, y)) return Action.SUPPORT;
+        if (SETTINGS.contains(x, y)) return Action.SETTINGS;
+        if (NEWS.contains(x, y)) return Action.NEWS;
+        return null;
+    }
+
+    private AccountApi.CharacterInfo findCharacter(long id) {
+        if (id <= 0) return null;
+        for (AccountApi.CharacterInfo c : characters) if (c.id == id) return c;
+        return null;
+    }
+
+    private static final class NewsItem {
+        final String title;
+        final String body;
+        final String date;
+        NewsItem(String title, String body, String date) { this.title = title; this.body = body; this.date = date; }
+    }
+}
