@@ -100,7 +100,7 @@
     private void drawThumbPlaceholder(Canvas canvas, RectF rect, int index) {
         int[] bases = new int[]{ Color.rgb(84, 77, 92), Color.rgb(66, 82, 76), Color.rgb(43, 63, 82) };
         uiPaint.setShader(new LinearGradient(rect.left, rect.top, rect.right, rect.bottom,
-                Color.argb(255, 248, 154, 90), Color.argb(255, bases[index]), Shader.TileMode.CLAMP));
+                Color.argb(255, 248, 154, 90), bases[index], Shader.TileMode.CLAMP));
         canvas.drawRoundRect(rect, 18, 18, uiPaint);
         uiPaint.setShader(null);
         uiPaint.setStyle(Paint.Style.STROKE);
