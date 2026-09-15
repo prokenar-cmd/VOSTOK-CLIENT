@@ -1,9 +1,9 @@
-name: Build Kuzia GTA 2.11 Vanilla
+name: Build Kuzia + BlackRussia Cache Test
 
 on:
   push:
     branches:
-      - experiment-kuzia-vanilla
+      - experiment-kuzia-blackrussia-cache
   workflow_dispatch:
 
 jobs:
@@ -20,7 +20,7 @@ jobs:
           path: kuzia
           persist-credentials: false
 
-      - name: Apply build and startup compatibility fixes
+      - name: Apply build and BlackRussia cache compatibility patches
         shell: bash
         run: |
           set -euxo pipefail
@@ -32,15 +32,14 @@ jobs:
           sed -i 's#"RGBA.h"#"rgba.h"#g' \
             kuzia/app/src/main/cpp/samp/game/rgba.cpp
 
-          # Upstream README says the GTA 2.11 cache lives in /storage/emulated/0/GTA/,
-          # while this source revision accidentally points GameActivityBase to /VICE/.
-          # Align runtime with the documented cache location.
-          sed -i 's#new File(documentsDir, "VICE")#new File(documentsDir, "GTA")#g' \
+          # Compatibility experiment only: point Kuzia at the existing untouched
+          # VOSTOK/Black Russia cache instead of /GTA/. No cache files are modified.
+          sed -i 's#new File(documentsDir, "VICE")#new File(documentsDir, "BlackRussia")#g' \
             kuzia/app/src/main/java/com/rockstargames/oswrapper/GameActivityBase.java
 
-          # Do not enter native GTA when the external GTA 2.11 cache is missing.
-          # The vanilla build previously appeared to "close" immediately because
-          # START launched the native activity even with an empty game directory.
+          # START should only enter native GTA if the existing BlackRussia cache
+          # is visible. Keep the check intentionally minimal because donor cache
+          # layouts differ from stock GTA 2.11.
           python3 - <<'PY'
           from pathlib import Path
 
@@ -53,7 +52,7 @@ jobs:
 
           old = '''    private void startGame() {\n        try {\n            Log.d("MainActivity", "Starting game");\n            Intent gameIntent = new Intent(MainActivity.this, SAMP.class);\n            startActivity(gameIntent);\n        } catch (Exception e) {\n            Log.e("MainActivity", "Error starting game: " + e.getMessage());\n        }\n    }\n'''
 
-          new = '''    private boolean hasGameCache() {\n        File gameDir = new File("/storage/emulated/0/GTA");\n        File dataDir = new File(gameDir, "data");\n        File modelsDir = new File(gameDir, "models");\n        File texdbDir = new File(gameDir, "texdb");\n        return gameDir.isDirectory()\n                && dataDir.isDirectory()\n                && modelsDir.isDirectory()\n                && texdbDir.isDirectory();\n    }\n\n    private void startGame() {\n        try {\n            if (!hasGameCache()) {\n                Log.e("MainActivity", "GTA 2.11 cache missing at /storage/emulated/0/GTA/");\n                Toast.makeText(this,\n                        "Кэш GTA 2.11 не найден. Ожидается папка /storage/emulated/0/GTA/",\n                        Toast.LENGTH_LONG).show();\n                return;\n            }\n\n            Log.d("MainActivity", "Starting game with cache /storage/emulated/0/GTA/");\n            Intent gameIntent = new Intent(MainActivity.this, SAMP.class);\n            startActivity(gameIntent);\n        } catch (Exception e) {\n            Log.e("MainActivity", "Error starting game: " + e.getMessage(), e);\n            Toast.makeText(this, "Ошибка запуска игры: " + e.getClass().getSimpleName(), Toast.LENGTH_LONG).show();\n        }\n    }\n'''
+          new = '''    private boolean hasGameCache() {\n        File gameDir = new File("/storage/emulated/0/BlackRussia");\n        File dataDir = new File(gameDir, "data");\n        File texdbDir = new File(gameDir, "texdb");\n        return gameDir.isDirectory()\n                && dataDir.isDirectory()\n                && texdbDir.isDirectory();\n    }\n\n    private void startGame() {\n        try {\n            if (!hasGameCache()) {\n                Log.e("MainActivity", "BlackRussia cache missing at /storage/emulated/0/BlackRussia/");\n                Toast.makeText(this,\n                        "Кэш BlackRussia не найден или неполный: /storage/emulated/0/BlackRussia/",\n                        Toast.LENGTH_LONG).show();\n                return;\n            }\n\n            Log.d("MainActivity", "Starting Kuzia with cache /storage/emulated/0/BlackRussia/");\n            Toast.makeText(this,\n                    "Тест: запускаем Kuzia с существующим кэшем BlackRussia",\n                    Toast.LENGTH_SHORT).show();\n            Intent gameIntent = new Intent(MainActivity.this, SAMP.class);\n            startActivity(gameIntent);\n        } catch (Exception e) {\n            Log.e("MainActivity", "Error starting game: " + e.getMessage(), e);\n            Toast.makeText(this, "Ошибка запуска игры: " + e.getClass().getSimpleName(), Toast.LENGTH_LONG).show();\n        }\n    }\n'''
 
           if old not in s:
               raise SystemExit('startGame() block not found; upstream changed')
@@ -65,7 +64,6 @@ jobs:
           # BASS/BASS SSL are already linked from CMake vendor/bass/libs and AGP
           # packages those linked shared objects. Upstream also places copies in
           # jniLibs, which causes mergeDebugNativeLibs duplicate-path failure.
-          # Keep the CMake-linked copies so runtime matches what libsamp links to.
           rm -f kuzia/app/src/main/jniLibs/arm64-v8a/libbass.so
           rm -f kuzia/app/src/main/jniLibs/arm64-v8a/libbass_ssl.so
 
@@ -93,7 +91,7 @@ jobs:
             "ndk;26.2.11394342" \
             "cmake;3.22.1"
 
-      - name: Build vanilla debug APK
+      - name: Build BlackRussia cache test APK
         working-directory: kuzia
         shell: bash
         run: |
@@ -106,11 +104,11 @@ jobs:
         run: |
           find kuzia/app/build/outputs -maxdepth 6 -type f 2>/dev/null | sort || true
 
-      - name: Upload vanilla APK
+      - name: Upload BlackRussia cache test APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: KUZIA_GTA_2_11_VANILLA_DEBUG
+          name: KUZIA_BLACKRUSSIA_CACHE_TEST
           path: kuzia/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 7
