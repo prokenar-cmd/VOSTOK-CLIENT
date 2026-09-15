@@ -1,0 +1,140 @@
+package com.vostok.launcher.ui;
+
+import android.animation.ValueAnimator;
+import android.content.Context;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.LinearGradient;
+import android.graphics.Paint;
+import android.graphics.RectF;
+import android.graphics.Shader;
+import android.graphics.Typeface;
+import android.graphics.drawable.Drawable;
+import android.util.AttributeSet;
+import android.view.MotionEvent;
+import android.view.View;
+import android.view.animation.DecelerateInterpolator;
+
+import androidx.annotation.Nullable;
+import androidx.core.content.res.ResourcesCompat;
+
+import com.blackrussia.game.R;
+import com.vostok.launcher.account.AccountApi;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * Clean VOSTOK launcher reconstruction.
+ * Background art is a separate clean image; every interactive element is drawn
+ * independently in a fixed 1891x831 project space and scaled to screen.
+ */
+public class VostokLauncherView extends View {
+
+    public enum Action { PLAY, SERVER, ACCOUNT, NEWS, SITE, VK, TELEGRAM, SUPPORT, SETTINGS }
+    public interface ActionListener { void onLauncherAction(Action action); }
+    public interface CharacterSelectionListener { void onCharacterSelected(long characterId); }
+
+    private static final float DESIGN_W = 1891.0f;
+    private static final float DESIGN_H = 831.0f;
+
+    private static final RectF PLAY = new RectF(1420, 621, 1856, 729);
+    private static final RectF SERVER = new RectF(1031, 621, 1400, 728);
+    private static final RectF ACCOUNT = new RectF(34, 628, 405, 721);
+    private static final RectF NEWS = new RectF(34, 205, 469, 610);
+    private static final RectF SITE = new RectF(1088, 28, 1195, 94);
+    private static final RectF VK = new RectF(1200, 28, 1337, 94);
+    private static final RectF TELEGRAM = new RectF(1342, 28, 1483, 94);
+    private static final RectF SUPPORT = new RectF(1488, 28, 1655, 94);
+    private static final RectF SETTINGS = new RectF(1660, 28, 1840, 94);
+    private static final float CHARACTER_ROW_HEIGHT = 67.0f;
+    private static final float CHARACTER_PANEL_GAP = 10.0f;
+    private static final int CHARACTER_PANEL_MAX_VISIBLE = 4;
+
+    private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+    private final Paint uiPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint shadowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final List<AccountApi.CharacterInfo> characters = new ArrayList<>();
+
+    private Bitmap backgroundBitmap;
+    private Drawable siteIcon;
+    private Drawable vkIcon;
+    private Drawable telegramIcon;
+    private Drawable supportIcon;
+    private Drawable settingsIcon;
+    private Drawable playIcon;
+    private Drawable expandIcon;
+    private ActionListener listener;
+    private CharacterSelectionListener characterSelectionListener;
+    private Typeface uiRegular = Typeface.DEFAULT;
+    private Typeface uiBold = Typeface.DEFAULT_BOLD;
+
+    private float bgScale = 1.0f, bgLeft = 0.0f, bgTop = 0.0f;
+    private float uiScale = 1.0f, uiLeft = 0.0f, uiTop = 0.0f;
+
+    private boolean accountAuthenticated = false;
+    private long accountId = 0L, selectedCharacterId = 0L;
+    private String selectedCharacterName = "";
+    private boolean characterPanelOpen = false;
+    private float characterPanelProgress = 0.0f;
+    private ValueAnimator characterPanelAnimator;
+
+    private static final NewsItem[] NEWS_ITEMS = new NewsItem[] {
+            new NewsItem("ОБНОВЛЕНИЕ 0.1.5", "Новые машины, улучшения\nкарты и многое другое!", "28 августа 2026"),
+            new NewsItem("ЛЕТНИЙ СЕЗОН", "Подарки, ивенты\nи уникальные задания", "20 августа 2026"),
+            new NewsItem("ОТКРЫТ НАБОР В КОМАНДУ", "Ищем активных игроков\nв государственные фракции", "12 августа 2026")
+    };
+
+    public VostokLauncherView(Context context) { super(context); init(); }
+    public VostokLauncherView(Context context, @Nullable AttributeSet attrs) { super(context, attrs); init(); }
+    public VostokLauncherView(Context context, @Nullable AttributeSet attrs, int defStyleAttr) { super(context, attrs, defStyleAttr); init(); }
+
+    private void init() {
+        setClickable(true);
+        setFocusable(true);
+        backgroundBitmap = BitmapFactory.decodeResource(getResources(), R.drawable.vostok_launcher_clean_bg);
+        siteIcon = getResources().getDrawable(R.drawable.vostok_ic_site);
+        vkIcon = getResources().getDrawable(R.drawable.vostok_ic_vk);
+        telegramIcon = getResources().getDrawable(R.drawable.vostok_ic_telegram);
+        supportIcon = getResources().getDrawable(R.drawable.vostok_ic_support);
+        settingsIcon = getResources().getDrawable(R.drawable.vostok_ic_settings);
+        playIcon = getResources().getDrawable(R.drawable.vostok_ic_play);
+        expandIcon = getResources().getDrawable(R.drawable.vostok_ic_expand);
+        Typeface regular = ResourcesCompat.getFont(getContext(), R.font.pt_root_ui_regular);
+        Typeface bold = ResourcesCompat.getFont(getContext(), R.font.pt_root_ui_bold);
+        if (regular != null) uiRegular = regular;
+        if (bold != null) uiBold = bold;
+    }
+
+    public void setActionListener(ActionListener listener) { this.listener = listener; }
+    public void setCharacterSelectionListener(CharacterSelectionListener listener) { this.characterSelectionListener = listener; }
+
+    public void setAccountState(boolean authenticated, long newAccountId, long newCharacterId, String newCharacterName) {
+        accountAuthenticated = authenticated;
+        accountId = newAccountId;
+        selectedCharacterId = newCharacterId;
+        selectedCharacterName = newCharacterName == null ? "" : newCharacterName;
+        characters.clear();
+        closeCharacterPanel(false);
+        invalidate();
+    }
+
+    public void setAccountState(boolean authenticated, long newAccountId, List<AccountApi.CharacterInfo> newCharacters, long newSelectedCharacterId) {
+        accountAuthenticated = authenticated;
+        accountId = newAccountId;
+        characters.clear();
+        if (newCharacters != null) characters.addAll(newCharacters);
+        AccountApi.CharacterInfo selected = findCharacter(newSelectedCharacterId);
+        if (selected == null && !characters.isEmpty()) selected = characters.get(0);
+        selectedCharacterId = selected == null ? 0L : selected.id;
+        selectedCharacterName = selected == null ? "" : selected.name;
+        if (!authenticated || characters.isEmpty()) closeCharacterPanel(false);
+        invalidate();
+    }
+
+    public void setSelectedCharacter(long characterId) {
+        AccountApi.CharacterInfo selected = findCharacter(characterId);
+        if (selected == null) return;
+        selectedCharacterId = selected.id;
