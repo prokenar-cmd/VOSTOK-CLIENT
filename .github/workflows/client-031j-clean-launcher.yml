@@ -1,0 +1,180 @@
+name: VOSTOK 031J Clean Launcher
+
+on:
+  push:
+    branches: [ candidate-031j-clean-launcher ]
+    paths:
+      - 'candidate_assets/031j/**'
+      - 'overlay/**'
+      - 'tools/**'
+      - '.github/workflows/client-031j-clean-launcher.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Reconstruct confirmed VOSTOK client through 031H1
+        run: |
+          git clone https://github.com/Parad1st/Black-Russia-Source.git client
+          cd client
+          git checkout b7574b3ad246f31a15d15a28075936dd62e65fad
+          cd ..
+          cp -a overlay/. client/
+          rm -f client/app/src/main/java/com/blackrussia/launcher/other/UnZipCallback.java
+          python3 tools/apply_vostok_ui_foundation.py
+          python3 tools/apply_vostok_native_ui_bridge.py
+          python3 tools/apply_vostok_control_fix_022.py
+          python3 tools/apply_vostok_interaction_button_023.py
+          python3 tools/validate_account_core.py client
+          python3 tools/apply_vostok_candidate_024.py
+          python3 tools/apply_vostok_candidate_026.py
+          python3 tools/apply_vostok_candidate_027f.py
+          python3 tools/apply_vostok_candidate_031a.py
+          python3 tools/apply_vostok_candidate_031b.py
+          python3 tools/apply_vostok_candidate_031c.py
+          python3 tools/apply_vostok_candidate_031d.py
+          python3 tools/apply_vostok_candidate_031e.py
+          python3 tools/apply_vostok_candidate_031f.py
+          python3 tools/apply_vostok_candidate_031g.py
+          python3 tools/apply_vostok_candidate_031g3.py
+          python3 tools/apply_vostok_candidate_031g4.py
+          python3 tools/apply_vostok_candidate_031g5.py
+          python3 tools/apply_vostok_candidate_031g5_1.py
+          python3 tools/apply_vostok_candidate_031g5_2.py
+          python3 tools/apply_vostok_candidate_031h_hud_editor.py
+          python3 tools/apply_vostok_candidate_031h1_hud_calibration.py
+          python3 tools/apply_vostok_candidate_031h1_compilefix.py
+          rm -f client/app/src/main/res/drawable-nodpi/vostok_launcher_reference.jpg
+
+      - name: Preserve 031I donor-decouple boundary
+        run: |
+          python3 tools/apply_vostok_candidate_031i_launcher_decouple.py client
+          python3 tools/apply_vostok_candidate_031i_compilefix.py
+
+      - name: Apply 031J clean launcher reconstruction
+        run: |
+          JAVA='client/app/src/main/java/com/vostok/launcher/ui/VostokLauncherView.java'
+          cat candidate_assets/031j/VostokLauncherView.part01 candidate_assets/031j/VostokLauncherView.part02 candidate_assets/031j/VostokLauncherView.part03 candidate_assets/031j/VostokLauncherView.part04 > "$JAVA"
+          mkdir -p client/app/src/main/res/drawable client/app/src/main/res/drawable-nodpi
+          cp candidate_assets/031j/res/drawable/vostok_ic_*.xml client/app/src/main/res/drawable/
+          cat candidate_assets/031j/background640/vostok_launcher_clean_bg.part00 candidate_assets/031j/background640/vostok_launcher_clean_bg.part01 candidate_assets/031j/background640/vostok_launcher_clean_bg.part02 | base64 -d > client/app/src/main/res/drawable-nodpi/vostok_launcher_clean_bg.webp
+          test "$(sha256sum client/app/src/main/res/drawable-nodpi/vostok_launcher_clean_bg.webp | cut -d' ' -f1)" = '2fcf74fe6ed393664b6f89a1fbd50fe57d20d5670820e407104ad1fec560dbbe'
+
+          # Old launcher art/config is not hidden; it is removed from this build tree.
+          rm -f client/app/src/main/res/drawable-nodpi/vostok_launcher_reference.webp
+          rm -f client/app/src/main/res/drawable-nodpi/vostok_launcher_reference.jpg
+          rm -f client/app/src/main/res/drawable/mylogo.jpg
+          rm -f client/app/google-services.json
+          rm -f 'client/Json files/stories.json' 'client/Json files/servers.json'
+
+      - name: Verify clean launcher contracts and preserved character selector
+        run: |
+          JAVA='client/app/src/main/java/com/vostok/launcher/ui/VostokLauncherView.java'
+          grep -q 'DESIGN_W = 1891.0f' "$JAVA"
+          grep -q 'DESIGN_H = 831.0f' "$JAVA"
+          grep -q 'R.drawable.vostok_launcher_clean_bg' "$JAVA"
+          grep -q 'setCharacterSelectionListener' "$JAVA"
+          grep -q 'toggleCharacterPanel' "$JAVA"
+          grep -q 'hitCharacterPanel' "$JAVA"
+          grep -q 'onCharacterSelected' "$JAVA"
+          test -f client/app/src/main/res/drawable/vostok_ic_site.xml
+          test -f client/app/src/main/res/drawable/vostok_ic_vk.xml
+          test -f client/app/src/main/res/drawable/vostok_ic_telegram.xml
+          test -f client/app/src/main/res/drawable/vostok_ic_support.xml
+          test -f client/app/src/main/res/drawable/vostok_ic_settings.xml
+          test -f client/app/src/main/res/drawable/vostok_ic_play.xml
+          test ! -e client/app/src/main/res/drawable-nodpi/vostok_launcher_reference.webp
+          test ! -e client/app/src/main/res/drawable-nodpi/vostok_launcher_reference.jpg
+          test ! -e client/app/src/main/res/drawable/mylogo.jpg
+          test ! -e client/app/google-services.json
+
+      - name: Verify donor launcher remains physically absent
+        run: |
+          test ! -d client/app/src/main/java/com/blackrussia/launcher
+          test ! -f client/app/src/main/java/com/blackrussia/game/gui/ChooseServer.java
+          ! grep -R -n 'com.blackrussia.launcher' client/app/src/main/java client/app/src/main/AndroidManifest.xml
+          ! grep -R -n 'LoaderActivity\|SplashActivity\|StoryActivity' client/app/src/main/java/com/vostok/launcher client/app/src/main/AndroidManifest.xml
+          test ! -f client/app/src/main/res/layout/activity_splash.xml
+          test ! -f client/app/src/main/res/layout/activity_loader.xml
+          test ! -f client/app/src/main/res/layout/activity_main.xml
+          test ! -f client/app/src/main/res/layout/br_serverselect.xml
+          grep -q 'android:name="com.vostok.launcher.activity.VostokLauncherActivity"' client/app/src/main/AndroidManifest.xml
+
+      - name: Verify working game systems were not rolled back
+        run: |
+          ACT='client/app/src/main/java/com/nvidia/devtech/NvEventQueueActivity.java'
+          HUD='client/app/src/main/java/com/blackrussia/game/vostok/ui/hud/VostokHudController.java'
+          EDITOR='client/app/src/main/java/com/blackrussia/game/vostok/ui/hud/VostokHudEditorView.java'
+          BRIDGE='client/app/src/main/java/com/blackrussia/game/vostok/ui/VostokUiBridge.java'
+          grep -q 'percent > 100 && !mVostokAutoConnectIssued' "$ACT"
+          grep -q 'sendRPC(2, "VOSTOK".getBytes(), 0)' "$ACT"
+          grep -q 'hudManager.HideHud();' "$BRIDGE"
+          ! grep -q 'hudManager.ShowHud();' "$BRIDGE"
+          grep -q 'VostokHudEditorView editorView' "$HUD"
+          grep -q 'TARGET_RADAR' "$EDITOR"
+          grep -q 'VOSTOK_INVENTORY_ENABLED = true' client/app/src/main/java/com/blackrussia/game/vostok/ui/VostokUiFeatureFlags.java
+          grep -q 'VOSTOK_RADIAL_ENABLED = true' client/app/src/main/java/com/blackrussia/game/vostok/ui/VostokUiFeatureFlags.java
+          grep -q 'VOSTOK_VEHICLE_UI_ENABLED = true' client/app/src/main/java/com/blackrussia/game/vostok/ui/VostokUiFeatureFlags.java
+          grep -q '~VOSTOK_UI~INTERACT:SHOW:NPC:' 'client/Jni source/jni/chatwindow.cpp'
+
+      - name: Configure Android build
+        working-directory: client
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          Path('build.gradle').write_text('''buildscript {\n    repositories { mavenCentral(); google(); jcenter() }\n    dependencies { classpath 'com.android.tools.build:gradle:8.2.1' }\n}\nallprojects { repositories { mavenCentral(); google(); jcenter(); maven { url "https://jitpack.io" } } }\ntask clean(type: Delete) { delete rootProject.buildDir }\n''')
+          Path('app/build.gradle').write_text('''apply plugin: 'com.android.application'\nandroid {\n    namespace "com.blackrussia.game"\n    compileSdkVersion 30\n    compileOptions { sourceCompatibility 1.8; targetCompatibility 1.8 }\n    defaultConfig { minSdkVersion 17; targetSdkVersion 28; applicationId "com.vostok.roleplay"; versionName "031j-clean-launcher"; versionCode 48; vectorDrawables.useSupportLibrary = true; multiDexEnabled = true; ndk { abiFilters 'armeabi-v7a' } }\n}\ndependencies {\n    implementation fileTree(dir: "libs", include: ["*.jar"])\n    implementation 'androidx.appcompat:appcompat:1.1.0'\n    implementation 'com.google.android.material:material:1.0.0'\n    implementation group: 'org.ini4j', name: 'ini4j', version: '0.5.4'\n    implementation 'androidx.constraintlayout:constraintlayout:2.0.4'\n    implementation "com.github.skydoves:colorpickerpreference:2.0.4"\n}\n''')
+          p=Path('gradle/wrapper/gradle-wrapper.properties')
+          import re
+          p.write_text(re.sub(r'distributionUrl=.*', 'distributionUrl=https\\://services.gradle.org/distributions/gradle-8.2-bin.zip', p.read_text()))
+          PY
+
+      - name: Install Android SDK
+        run: |
+          yes | ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null || true
+          ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager "platforms;android-30" "build-tools;34.0.0"
+
+      - name: Build 031J APK
+        working-directory: client
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace :app:assembleDebug
+
+      - name: Verify compiled 031J APK
+        working-directory: client
+        run: |
+          APK='app/build/outputs/apk/debug/app-debug.apk'
+          test -f "$APK"
+          AAPT="${ANDROID_HOME}/build-tools/34.0.0/aapt"
+          "$AAPT" dump badging "$APK" | tee /tmp/031j-badging.txt
+          grep -q "application-label:'VOSTOK'" /tmp/031j-badging.txt
+          grep -q "launchable-activity: name='com.vostok.launcher.activity.VostokLauncherActivity'" /tmp/031j-badging.txt
+          : > /tmp/031j-classes.txt
+          for DEX in $(zipinfo -1 "$APK" 'classes*.dex'); do unzip -p "$APK" "$DEX" | strings >> /tmp/031j-classes.txt; done
+          grep -q 'Lcom/vostok/launcher/activity/VostokLauncherActivity;' /tmp/031j-classes.txt
+          ! grep -q 'Lcom/blackrussia/launcher/activity/SplashActivity;' /tmp/031j-classes.txt
+          ! grep -q 'Lcom/blackrussia/launcher/activity/LoaderActivity;' /tmp/031j-classes.txt
+          ! grep -q 'Lcom/blackrussia/launcher/activity/MainActivity;' /tmp/031j-classes.txt
+          sha256sum "$APK"
+
+      - name: Upload 031J APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: VOSTOK-CLIENT-CANDIDATE-031J-CLEAN-LAUNCHER
+          path: client/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Upload 031J full source
+        uses: actions/upload-artifact@v4
+        with:
+          name: VOSTOK-CLIENT-FULL-SOURCE-031J
+          path: client
+          if-no-files-found: error
