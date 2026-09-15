@@ -20,16 +20,47 @@ jobs:
           path: kuzia
           persist-credentials: false
 
-      - name: Apply build compatibility fixes
+      - name: Apply build and startup compatibility fixes
         shell: bash
         run: |
           set -euxo pipefail
+
           # Upstream was developed on case-insensitive Windows; Linux CI exposes
           # two filename-case mismatches. These changes do not alter client logic.
           sed -i 's#samp_widgets/playerTabList.h#samp_widgets/playertablist.h#g' \
             kuzia/app/src/main/cpp/samp/gui/gui.h
           sed -i 's#"RGBA.h"#"rgba.h"#g' \
             kuzia/app/src/main/cpp/samp/game/rgba.cpp
+
+          # Upstream README says the GTA 2.11 cache lives in /storage/emulated/0/GTA/,
+          # while this source revision accidentally points GameActivityBase to /VICE/.
+          # Align runtime with the documented cache location.
+          sed -i 's#new File(documentsDir, "VICE")#new File(documentsDir, "GTA")#g' \
+            kuzia/app/src/main/java/com/rockstargames/oswrapper/GameActivityBase.java
+
+          # Do not enter native GTA when the external GTA 2.11 cache is missing.
+          # The vanilla build previously appeared to "close" immediately because
+          # START launched the native activity even with an empty game directory.
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('kuzia/app/src/main/java/com/gta/launcher/activity/MainActivity.java')
+          s = p.read_text(encoding='utf-8')
+
+          if 'import java.io.File;' not in s:
+              marker = 'import androidx.core.content.ContextCompat;\n'
+              s = s.replace(marker, marker + '\nimport java.io.File;\n')
+
+          old = '''    private void startGame() {\n        try {\n            Log.d("MainActivity", "Starting game");\n            Intent gameIntent = new Intent(MainActivity.this, SAMP.class);\n            startActivity(gameIntent);\n        } catch (Exception e) {\n            Log.e("MainActivity", "Error starting game: " + e.getMessage());\n        }\n    }\n'''
+
+          new = '''    private boolean hasGameCache() {\n        File gameDir = new File("/storage/emulated/0/GTA");\n        File dataDir = new File(gameDir, "data");\n        File modelsDir = new File(gameDir, "models");\n        File texdbDir = new File(gameDir, "texdb");\n        return gameDir.isDirectory()\n                && dataDir.isDirectory()\n                && modelsDir.isDirectory()\n                && texdbDir.isDirectory();\n    }\n\n    private void startGame() {\n        try {\n            if (!hasGameCache()) {\n                Log.e("MainActivity", "GTA 2.11 cache missing at /storage/emulated/0/GTA/");\n                Toast.makeText(this,\n                        "Кэш GTA 2.11 не найден. Ожидается папка /storage/emulated/0/GTA/",\n                        Toast.LENGTH_LONG).show();\n                return;\n            }\n\n            Log.d("MainActivity", "Starting game with cache /storage/emulated/0/GTA/");\n            Intent gameIntent = new Intent(MainActivity.this, SAMP.class);\n            startActivity(gameIntent);\n        } catch (Exception e) {\n            Log.e("MainActivity", "Error starting game: " + e.getMessage(), e);\n            Toast.makeText(this, "Ошибка запуска игры: " + e.getClass().getSimpleName(), Toast.LENGTH_LONG).show();\n        }\n    }\n'''
+
+          if old not in s:
+              raise SystemExit('startGame() block not found; upstream changed')
+
+          s = s.replace(old, new)
+          p.write_text(s, encoding='utf-8')
+          PY
 
           # BASS/BASS SSL are already linked from CMake vendor/bass/libs and AGP
           # packages those linked shared objects. Upstream also places copies in
