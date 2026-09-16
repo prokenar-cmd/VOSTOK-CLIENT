@@ -1,0 +1,212 @@
+name: Build John GTA 2.11.311 Texture Diagnostics
+
+on:
+  push:
+    branches:
+      - experiment-john-texturediag
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        variant:
+          - no_level0
+          - hook_only
+          - inert
+
+    steps:
+      - name: Checkout John source
+        uses: actions/checkout@v4
+        with:
+          repository: JohnPeriaX/samp-mobile-2.11.311
+          ref: 0df908fccfc26ac3ef54e004504b5b1f122362b1
+          path: john
+          persist-credentials: false
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+          cache-dependency-path: john/**/*.gradle*
+
+      - name: Prepare preinstalled Android SDK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager \
+            'platform-tools' \
+            'platforms;android-36' \
+            'build-tools;36.0.0' \
+            'ndk;26.2.11394342' \
+            'cmake;3.22.1'
+
+      - name: Patch John diagnostic variant
+        shell: bash
+        env:
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          set -euxo pipefail
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          variant = os.environ['VARIANT']
+          main = Path('john/app/src/main/cpp/multiplayer/samp/main.cpp')
+          text = main.read_text(encoding='utf-8')
+
+          old_endpoint = 'pNetGame = new CNetGame("gta-irz.com", 7777, "Luca_Runky", "");'
+          new_endpoint = '''if (!pSettings) {
+                    FLog("Network init aborted: settings are unavailable");
+                    return;
+                }
+                pNetGame = new CNetGame(
+                        pSettings->Get().szHost,
+                        pSettings->Get().iPort,
+                        pSettings->Get().szNickName,
+                        pSettings->Get().szPassword);'''
+          if old_endpoint not in text:
+              raise SystemExit('Expected hard-coded John endpoint not found')
+          text = text.replace(old_endpoint, new_endpoint, 1)
+
+          def disable(call, marker):
+              nonlocal_text = None
+              return
+
+          replacements = {
+              'no_level0': [
+                  ('\tApplyPatches_level0();', '\tFLog("DIAG no_level0: ApplyPatches_level0 disabled");'),
+              ],
+              'hook_only': [
+                  ('\tApplyPatches_level0();', '\tFLog("DIAG hook_only: ApplyPatches_level0 disabled");'),
+                  ('\tInitFPSFix(120);', '\tFLog("DIAG hook_only: InitFPSFix disabled");'),
+                  ('    InitRenderWareFunctions();', '    FLog("DIAG hook_only: InitRenderWareFunctions disabled");'),
+              ],
+              'inert': [
+                  ('\tInstallSpecialHooks();', '\tFLog("DIAG inert: InstallSpecialHooks disabled");'),
+                  ('\tApplyPatches_level0();', '\tFLog("DIAG inert: ApplyPatches_level0 disabled");'),
+                  ('\tInitFPSFix(120);', '\tFLog("DIAG inert: InitFPSFix disabled");'),
+                  ('    InitRenderWareFunctions();', '    FLog("DIAG inert: InitRenderWareFunctions disabled");'),
+              ],
+          }
+          if variant not in replacements:
+              raise SystemExit(f'Unknown variant: {variant}')
+
+          for old, new in replacements[variant]:
+              if old not in text:
+                  raise SystemExit(f'Expected init call not found for {variant}: {old!r}')
+              text = text.replace(old, new, 1)
+
+          main.write_text(text, encoding='utf-8')
+
+          assets = Path('john/app/src/main/assets')
+          assets.mkdir(parents=True, exist_ok=True)
+          (assets / 'settings.ini').write_text('''[client]
+          name=AndroidUser
+          host=127.0.0.1
+          port=7777
+          password=
+          version=0.3.7
+          autoaim=false
+
+          [debug]
+          debug=false
+          online=true
+
+          [gui]
+          Font=arial.ttf
+          FontSize=30
+          FontOutline=2
+          androidkeyboard=false
+          VoiceChatEnable=false
+          fps=0
+          ChatMaxMessages=6
+          FPSLimit=60
+          Dialog=true
+          ''', encoding='utf-8')
+          PY
+
+          echo "=== DIAGNOSTIC VARIANT: $VARIANT ==="
+          grep -n -A28 -B4 'CHook::InitHookStuff' john/app/src/main/cpp/multiplayer/samp/main.cpp
+
+      - name: Verify John source profile
+        shell: bash
+        run: |
+          set -euxo pipefail
+          grep -q "compileSdk 36" john/app/build.gradle
+          grep -q "targetSdk 36" john/app/build.gradle
+          grep -q "abiFilters 'arm64-v8a'" john/app/build.gradle
+          grep -q "ndkVersion '26.2.11394342'" john/app/build.gradle
+          grep -q 'max-page-size=16384' john/app/src/main/cpp/multiplayer/CMakeLists.txt
+          test -f john/app/src/main/jniLibs/arm64-v8a/libGame.so
+          sha256sum john/app/src/main/jniLibs/arm64-v8a/libGame.so
+          test "$(sha256sum john/app/src/main/jniLibs/arm64-v8a/libGame.so | awk '{print toupper($1)}')" = "4C6A7445E30B27AFDDA781302E4DB9BAC89C28FC1181B68B1EEF16F84D6A282E"
+
+      - name: Remove duplicate packaged native libs
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test -f john/app/src/main/cpp/multiplayer/vendor/bass/libs/arm64-v8a/libbass.so
+          test -f john/app/src/main/cpp/multiplayer/vendor/bass/libs/arm64-v8a/libbass_ssl.so
+          test -f john/app/src/main/cpp/multiplayer/vendor/patch/libs/ARM64/libGlossHook.so
+          rm -f \
+            john/app/src/main/jniLibs/arm64-v8a/libbass.so \
+            john/app/src/main/jniLibs/arm64-v8a/libbass_ssl.so \
+            john/app/src/main/jniLibs/arm64-v8a/libGlossHook.so
+
+      - name: Build diagnostic APK
+        working-directory: john
+        shell: bash
+        env:
+          GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx6g -Dfile.encoding=UTF-8
+        run: |
+          set -euxo pipefail
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace clean assembleDebug
+
+      - name: Validate and stage diagnostic APK
+        shell: bash
+        env:
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          set -euxo pipefail
+          APK="$(find john/app/build/outputs/apk/debug -type f -name '*.apk' | head -n 1)"
+          test -n "$APK"
+          test -s "$APK"
+
+          rm -rf /tmp/john-apk
+          mkdir -p /tmp/john-apk
+          unzip -q "$APK" -d /tmp/john-apk
+
+          test -f /tmp/john-apk/lib/arm64-v8a/libsamp.so
+          test -f /tmp/john-apk/lib/arm64-v8a/libGame.so
+          test ! -d /tmp/john-apk/lib/armeabi-v7a
+          test "$(sha256sum /tmp/john-apk/lib/arm64-v8a/libGame.so | awk '{print toupper($1)}')" = "4C6A7445E30B27AFDDA781302E4DB9BAC89C28FC1181B68B1EEF16F84D6A282E"
+
+          OUT="JOHN_TEXTURE_DIAG_${VARIANT}.apk"
+          cp "$APK" "$OUT"
+          sha256sum "$OUT" > "${OUT}.sha256"
+          sha256sum "$OUT"
+
+      - name: Upload diagnostic APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: JOHN-TEXTURE-DIAG-${{ matrix.variant }}
+          path: |
+            JOHN_TEXTURE_DIAG_${{ matrix.variant }}.apk
+            JOHN_TEXTURE_DIAG_${{ matrix.variant }}.apk.sha256
+          if-no-files-found: error
+          retention-days: 14
