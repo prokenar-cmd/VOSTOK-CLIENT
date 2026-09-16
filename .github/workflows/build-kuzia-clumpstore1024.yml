@@ -111,10 +111,39 @@ jobs:
           This is NOT a MASTER promotion and requires device smoke.
           EOF
 
+
+      - name: Disable incompatible precomputed CRIME collision cache
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('kuzia/app/src/main/cpp/samp/game/hooks.cpp')
+          s = p.read_text(encoding='utf-8')
+          marker = 'void InjectHooks()\n{\n'
+          assert s.count(marker) == 1
+          block = '''// CRIME CINFO references IPL entities absent from the GTA 2.11 load.
+          // Keep native allocation/cleanup, but use normal COL/IPL loading.
+          static void (*VostokColAccelStartCacheOriginal)();
+          static void VostokColAccelStartCache()
+          {
+              VostokColAccelStartCacheOriginal();
+              auto* state = reinterpret_cast<int32_t*>(g_libGTASA + 0xC23048);
+              Log("VOSTOK ColAccel: native state=%d -> disabled (CRIME compatibility)", *state);
+              *state = 0;
+          }
+
+          '''
+          s = s.replace(marker, block + marker, 1)
+          hook = '    CHook::InlineHook("_ZN9CColAccel10startCacheEv", &VostokColAccelStartCache, &VostokColAccelStartCacheOriginal);\n'
+          s = s.replace('    Log("InjectHooks");\n', '    Log("InjectHooks");\n' + hook, 1)
+          p.write_text(s, encoding='utf-8')
+          PY
+
       - name: Upload source snapshot
         uses: actions/upload-artifact@v4
         with:
-          name: VOSTOK_KUZIA_CRIME_CLUMPSTORE1024_SOURCE
+          name: VOSTOK_KUZIA_CRIME_COLACCEL_DISABLED_SOURCE
           path: kuzia
           if-no-files-found: error
           retention-days: 7
@@ -172,13 +201,15 @@ jobs:
             exit 1
           fi
 
+          strings /tmp/libsamp.so | grep -F 'VOSTOK ColAccel: native state='
+
           sha256sum /tmp/libsamp.so "$APK"
 
       - name: Upload APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: KUZIA_GOLDCRIME_CLUMPSTORE1024_FIX
+          name: KUZIA_GOLDCRIME_COLACCEL_DISABLED_FIX
           path: kuzia/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 7
@@ -187,7 +218,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: KUZIA_GOLDCRIME_CLUMPSTORE1024_FIX_LIBSAMP
+          name: KUZIA_GOLDCRIME_COLACCEL_DISABLED_FIX_LIBSAMP
           path: /tmp/libsamp.so
           if-no-files-found: error
           retention-days: 7
