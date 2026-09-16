@@ -62,6 +62,34 @@ jobs:
           rm -f kuzia/app/src/main/jniLibs/arm64-v8a/libbass.so
           rm -f kuzia/app/src/main/jniLibs/arm64-v8a/libbass_ssl.so
 
+          cat > kuzia/VOSTOK_SOURCE_STATE.md <<'EOF'
+          # VOSTOK / Kuzia launcher source snapshot
+
+          Purpose: editable Codex source snapshot of the current isolated Kuzia + CRIME compatibility experiment.
+
+          Upstream: kuzia15/SAMP-Mobile
+          Upstream ref: 5e531514a0bbb3d56b1a72e51fa44b18cfaf2ee2
+          VOSTOK experiment branch: experiment-kuzia-goldcrime-cache
+          Base experiment commit before export: 6e5fe210fdc8fe0cb4b80b785f9d84558d00403f
+
+          Applied changes:
+          - Linux filename-case build fixes.
+          - GTA base directory changed from VICE to GTA_CRIME_TEST.
+          - Native SAMP settings path changed to /storage/emulated/0/GTA_CRIME_TEST/SAMP/settings.ini.
+          - Launcher START checks CRIME cache directories and SAMP/settings.ini before native launch.
+          - Duplicate BASS jniLibs removed because CMake already supplies them.
+
+          This is an experimental source snapshot only. It does not replace VOSTOK MASTER or legacy main.
+          EOF
+
+      - name: Upload current launcher source for Codex
+        uses: actions/upload-artifact@v4
+        with:
+          name: VOSTOK_KUZIA_LAUNCHER_SOURCE_CURRENT
+          path: kuzia
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
