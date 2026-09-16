@@ -1,4 +1,4 @@
-name: Build Kuzia + Gold Crime Settings Fix
+name: Build Kuzia + Gold Crime Unified Root
 
 on:
   push:
@@ -20,27 +20,61 @@ jobs:
           path: kuzia
           persist-credentials: false
 
-      - name: Apply Gold Crime mirror compatibility patches
+      - name: Apply CRIME unified cache-root patches
         shell: bash
         run: |
           set -euxo pipefail
 
+          # Upstream Linux build fixes already proven in earlier experiment runs.
           sed -i 's#samp_widgets/playerTabList.h#samp_widgets/playertablist.h#g' \
             kuzia/app/src/main/cpp/samp/gui/gui.h
           sed -i 's#"RGBA.h"#"rgba.h"#g' \
             kuzia/app/src/main/cpp/samp/game/rgba.cpp
 
-          # GTA base directory for this isolated compatibility test.
+          # Java GTA base directory for this isolated compatibility test.
           sed -i 's#new File(documentsDir, "VICE")#new File(documentsDir, "GTA_CRIME_TEST")#g' \
             kuzia/app/src/main/java/com/rockstargames/oswrapper/GameActivityBase.java
 
-          # Kuzia native code has its own hardcoded settings path. Run #10 crashed
-          # in CSettings because it still looked at /storage/emulated/0/GTA/.
-          sed -i 's#/storage/emulated/0/GTA/SAMP/settings.ini#/storage/emulated/0/GTA_CRIME_TEST/SAMP/settings.ini#g' \
-            kuzia/app/src/main/cpp/samp/settings.cpp
+          # Native code contains several independent hardcoded /GTA/ roots
+          # (settings.cpp, main.cpp, game/hooks.cpp and possibly more). Replace
+          # the exact legacy root everywhere under app/src/main so Java and every
+          # native loader use the same CRIME test cache.
+          python3 - <<'PY'
+          from pathlib import Path
 
-          grep -n 'GTA_CRIME_TEST/SAMP/settings.ini' kuzia/app/src/main/cpp/samp/settings.cpp
+          root = Path('kuzia/app/src/main')
+          old = '/storage/emulated/0/GTA/'
+          new = '/storage/emulated/0/GTA_CRIME_TEST/'
+          changed = []
 
+          for p in root.rglob('*'):
+              if not p.is_file():
+                  continue
+              try:
+                  s = p.read_text(encoding='utf-8')
+              except (UnicodeDecodeError, OSError):
+                  continue
+              if old in s:
+                  p.write_text(s.replace(old, new), encoding='utf-8')
+                  changed.append(str(p))
+
+          print('Unified cache root changed in:')
+          for p in changed:
+              print(' -', p)
+          if not changed:
+              raise SystemExit('No legacy /storage/emulated/0/GTA/ roots were found to patch')
+          PY
+
+          # Fail the build if any exact legacy /GTA root remains in source.
+          if grep -R --binary-files=without-match -nE '/storage/emulated/0/GTA(/|\")' kuzia/app/src/main; then
+            echo 'ERROR: legacy GTA cache root still present in source'
+            exit 1
+          fi
+
+          grep -R --binary-files=without-match -nF '/storage/emulated/0/GTA_CRIME_TEST/' \
+            kuzia/app/src/main/cpp kuzia/app/src/main/java | head -100
+
+          # START guard: do not enter native GTA with an incomplete CRIME cache.
           python3 - <<'PY'
           from pathlib import Path
 
@@ -59,33 +93,36 @@ jobs:
           p.write_text(s.replace(old, new), encoding='utf-8')
           PY
 
+          # CMake already supplies BASS; remove duplicate jniLibs copies.
           rm -f kuzia/app/src/main/jniLibs/arm64-v8a/libbass.so
           rm -f kuzia/app/src/main/jniLibs/arm64-v8a/libbass_ssl.so
 
           cat > kuzia/VOSTOK_SOURCE_STATE.md <<'EOF'
           # VOSTOK / Kuzia launcher source snapshot
 
-          Purpose: editable Codex source snapshot of the current isolated Kuzia + CRIME compatibility experiment.
+          Purpose: editable source snapshot of the isolated Kuzia + CRIME compatibility experiment.
 
           Upstream: kuzia15/SAMP-Mobile
           Upstream ref: 5e531514a0bbb3d56b1a72e51fa44b18cfaf2ee2
           VOSTOK experiment branch: experiment-kuzia-goldcrime-cache
-          Base experiment commit before export: 6e5fe210fdc8fe0cb4b80b785f9d84558d00403f
 
-          Applied changes:
+          Current experiment changes:
           - Linux filename-case build fixes.
-          - GTA base directory changed from VICE to GTA_CRIME_TEST.
-          - Native SAMP settings path changed to /storage/emulated/0/GTA_CRIME_TEST/SAMP/settings.ini.
-          - Launcher START checks CRIME cache directories and SAMP/settings.ini before native launch.
+          - Java GTA base directory changed from VICE to GTA_CRIME_TEST.
+          - Every exact native/source cache root /storage/emulated/0/GTA/ under app/src/main is changed to /storage/emulated/0/GTA_CRIME_TEST/.
+          - This includes settings.cpp, main.cpp, game/hooks.cpp and any other discovered source occurrence.
+          - Launcher START validates data, texdb, models, SAMP and SAMP/settings.ini before native launch.
           - Duplicate BASS jniLibs removed because CMake already supplies them.
+          - CI fails if a legacy /storage/emulated/0/GTA root remains.
+          - CI also inspects the rebuilt arm64 libsamp.so inside the APK and fails if it still contains the old root.
 
-          This is an experimental source snapshot only. It does not replace VOSTOK MASTER or legacy main.
+          This is an experiment only. It does not replace VOSTOK MASTER, current legacy client MASTER, or server Candidate 028.
           EOF
 
-      - name: Upload current launcher source for Codex
+      - name: Upload unified-root source for Codex
         uses: actions/upload-artifact@v4
         with:
-          name: VOSTOK_KUZIA_LAUNCHER_SOURCE_CURRENT
+          name: VOSTOK_KUZIA_LAUNCHER_SOURCE_ROOT_UNIFIED
           path: kuzia
           if-no-files-found: error
           retention-days: 7
@@ -114,18 +151,48 @@ jobs:
             "ndk;26.2.11394342" \
             "cmake;3.22.1"
 
-      - name: Build settings-fix APK
+      - name: Build unified-root APK
         working-directory: kuzia
         shell: bash
         run: |
+          set -euxo pipefail
           chmod +x gradlew
-          ./gradlew :app:assembleDebug --stacktrace --no-daemon
+          rm -rf app/.cxx app/build/intermediates/cxx app/build/intermediates/merged_native_libs
+          ./gradlew :app:assembleDebug --stacktrace --no-daemon --rerun-tasks
 
-      - name: Upload settings-fix APK
+      - name: Verify rebuilt libsamp cache root inside APK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          APK="$(find kuzia/app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' | head -1)"
+          test -n "$APK"
+          unzip -p "$APK" lib/arm64-v8a/libsamp.so > /tmp/libsamp.so
+          test -s /tmp/libsamp.so
+
+          echo 'Expected CRIME root strings in rebuilt libsamp.so:'
+          strings /tmp/libsamp.so | grep -F '/storage/emulated/0/GTA_CRIME_TEST/' | head -20
+
+          if strings /tmp/libsamp.so | grep -F '/storage/emulated/0/GTA/'; then
+            echo 'ERROR: rebuilt libsamp.so still contains legacy /storage/emulated/0/GTA/'
+            exit 1
+          fi
+
+          sha256sum /tmp/libsamp.so "$APK"
+
+      - name: Upload unified-root APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: KUZIA_GOLDCRIME_SETTINGS_FIX
+          name: KUZIA_GOLDCRIME_ROOT_UNIFIED
           path: kuzia/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload rebuilt libsamp
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: KUZIA_GOLDCRIME_ROOT_UNIFIED_LIBSAMP
+          path: /tmp/libsamp.so
           if-no-files-found: error
           retention-days: 7
