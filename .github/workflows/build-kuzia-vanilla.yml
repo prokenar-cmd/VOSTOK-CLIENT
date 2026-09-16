@@ -1,4 +1,4 @@
-name: Build Kuzia + Gold Crime Mirror Test
+name: Build Kuzia + Gold Crime Settings Fix
 
 on:
   push:
@@ -20,47 +20,45 @@ jobs:
           path: kuzia
           persist-credentials: false
 
-      - name: Apply build and Gold Crime mirror patches
+      - name: Apply Gold Crime mirror compatibility patches
         shell: bash
         run: |
           set -euxo pipefail
 
-          # Upstream was developed on case-insensitive Windows; Linux CI exposes
-          # two filename-case mismatches. These do not alter client logic.
           sed -i 's#samp_widgets/playerTabList.h#samp_widgets/playertablist.h#g' \
             kuzia/app/src/main/cpp/samp/gui/gui.h
           sed -i 's#"RGBA.h"#"rgba.h"#g' \
             kuzia/app/src/main/cpp/samp/game/rgba.cpp
 
-          # Android blocks ordinary apps from reading another app's Android/data
-          # directory. For this compatibility test the untouched Gold/Crime cache
-          # is mirrored by ADB to /storage/emulated/0/GTA_CRIME_TEST/.
+          # GTA base directory for this isolated compatibility test.
           sed -i 's#new File(documentsDir, "VICE")#new File(documentsDir, "GTA_CRIME_TEST")#g' \
             kuzia/app/src/main/java/com/rockstargames/oswrapper/GameActivityBase.java
 
-          # Only launch native GTA when the mirrored Gold/Crime cache is present.
-          # The test APK never copies, deletes or changes donor cache files itself.
+          # Kuzia native code has its own hardcoded settings path. Run #10 crashed
+          # in CSettings because it still looked at /storage/emulated/0/GTA/.
+          sed -i 's#/storage/emulated/0/GTA/SAMP/settings.ini#/storage/emulated/0/GTA_CRIME_TEST/SAMP/settings.ini#g' \
+            kuzia/app/src/main/cpp/samp/settings.cpp
+
+          grep -n 'GTA_CRIME_TEST/SAMP/settings.ini' kuzia/app/src/main/cpp/samp/settings.cpp
+
           python3 - <<'PY'
           from pathlib import Path
 
           p = Path('kuzia/app/src/main/java/com/gta/launcher/activity/MainActivity.java')
           s = p.read_text(encoding='utf-8')
-
           if 'import java.io.File;' not in s:
               marker = 'import androidx.core.content.ContextCompat;\n'
               s = s.replace(marker, marker + '\nimport java.io.File;\n')
 
           old = '''    private void startGame() {\n        try {\n            Log.d("MainActivity", "Starting game");\n            Intent gameIntent = new Intent(MainActivity.this, SAMP.class);\n            startActivity(gameIntent);\n        } catch (Exception e) {\n            Log.e("MainActivity", "Error starting game: " + e.getMessage());\n        }\n    }\n'''
 
-          new = '''    private boolean hasGameCache() {\n        File gameDir = new File("/storage/emulated/0/GTA_CRIME_TEST");\n        File dataDir = new File(gameDir, "data");\n        File texdbDir = new File(gameDir, "texdb");\n        File modelsDir = new File(gameDir, "models");\n        File sampDir = new File(gameDir, "SAMP");\n        return gameDir.isDirectory()\n                && dataDir.isDirectory()\n                && texdbDir.isDirectory()\n                && modelsDir.isDirectory()\n                && sampDir.isDirectory();\n    }\n\n    private void startGame() {\n        try {\n            if (!hasGameCache()) {\n                Log.e("MainActivity", "Gold/Crime mirror cache missing at /storage/emulated/0/GTA_CRIME_TEST/");\n                Toast.makeText(this,\n                        "Кэш Gold/Crime не найден. Ожидается /storage/emulated/0/GTA_CRIME_TEST/",\n                        Toast.LENGTH_LONG).show();\n                return;\n            }\n\n            Log.d("MainActivity", "Starting Kuzia with Gold/Crime mirror cache");\n            Toast.makeText(this,\n                    "Тест: запускаем Kuzia с кэшем Gold/Crime",\n                    Toast.LENGTH_SHORT).show();\n            Intent gameIntent = new Intent(MainActivity.this, SAMP.class);\n            startActivity(gameIntent);\n        } catch (Exception e) {\n            Log.e("MainActivity", "Error starting game: " + e.getMessage(), e);\n            Toast.makeText(this, "Ошибка запуска игры: " + e.getClass().getSimpleName(), Toast.LENGTH_LONG).show();\n        }\n    }\n'''
+          new = '''    private boolean hasGameCache() {\n        File gameDir = new File("/storage/emulated/0/GTA_CRIME_TEST");\n        return gameDir.isDirectory()\n                && new File(gameDir, "data").isDirectory()\n                && new File(gameDir, "texdb").isDirectory()\n                && new File(gameDir, "models").isDirectory()\n                && new File(gameDir, "SAMP").isDirectory()\n                && new File(gameDir, "SAMP/settings.ini").isFile();\n    }\n\n    private void startGame() {\n        try {\n            if (!hasGameCache()) {\n                Toast.makeText(this,\n                        "Кэш CRIME неполный. Нужен /storage/emulated/0/GTA_CRIME_TEST/ с SAMP/settings.ini",\n                        Toast.LENGTH_LONG).show();\n                return;\n            }\n            Toast.makeText(this, "Тест: запускаем Kuzia с кэшем CRIME", Toast.LENGTH_SHORT).show();\n            startActivity(new Intent(MainActivity.this, SAMP.class));\n        } catch (Exception e) {\n            Log.e("MainActivity", "Error starting game: " + e.getMessage(), e);\n            Toast.makeText(this, "Ошибка запуска игры: " + e.getClass().getSimpleName(), Toast.LENGTH_LONG).show();\n        }\n    }\n'''
 
           if old not in s:
               raise SystemExit('startGame block not found')
-
           p.write_text(s.replace(old, new), encoding='utf-8')
           PY
 
-          # Upstream duplicates BASS libraries through CMake and jniLibs on Linux.
           rm -f kuzia/app/src/main/jniLibs/arm64-v8a/libbass.so
           rm -f kuzia/app/src/main/jniLibs/arm64-v8a/libbass_ssl.so
 
@@ -88,24 +86,18 @@ jobs:
             "ndk;26.2.11394342" \
             "cmake;3.22.1"
 
-      - name: Build Gold Crime mirror test APK
+      - name: Build settings-fix APK
         working-directory: kuzia
         shell: bash
         run: |
           chmod +x gradlew
           ./gradlew :app:assembleDebug --stacktrace --no-daemon
 
-      - name: List APK output
-        if: always()
-        shell: bash
-        run: |
-          find kuzia/app/build/outputs -maxdepth 6 -type f 2>/dev/null | sort || true
-
-      - name: Upload Gold Crime mirror test APK
+      - name: Upload settings-fix APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: KUZIA_GOLDCRIME_MIRROR_TEST
+          name: KUZIA_GOLDCRIME_SETTINGS_FIX
           path: kuzia/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 7
