@@ -1,0 +1,166 @@
+name: Build Kuzia + Gold Crime CdStream Guard 001
+
+on:
+  push:
+    branches:
+      - experiment-kuzia-goldcrime-cdstream-guard001
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout VOSTOK experiment branch
+        uses: actions/checkout@v4
+
+      - name: Download exact Run 35109806453 trace source
+        uses: actions/download-artifact@v4
+        with:
+          name: VOSTOK_KUZIA_CRIME_CDSTREAM_TRACE_SOURCE
+          path: kuzia
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: prokenar-cmd/VOSTOK-CLIENT
+          run-id: 35109806453
+
+      - name: Verify exact preserved baseline
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test -f kuzia/VOSTOK_SOURCE_STATE.md
+          test -f kuzia/app/src/main/cpp/samp/CdStreamTrace.cpp
+          test -f kuzia/app/src/main/cpp/samp/game/Models/ModelInfo.h
+          test -f kuzia/app/src/main/cpp/samp/game/Models/ModelInfo.cpp
+          test -f kuzia/app/src/main/cpp/samp/game/Streaming.cpp
+          test -f kuzia/app/src/main/cpp/samp/game/hooks.cpp
+
+          grep -nF 'NUM_PED_MODEL_INFOS = 512' kuzia/app/src/main/cpp/samp/game/Models/ModelInfo.h
+          grep -nF 'NUM_VEHICLE_MODEL_INFOS = 1024' kuzia/app/src/main/cpp/samp/game/Models/ModelInfo.h
+          grep -nF 'NUM_CLUMP_MODEL_INFOS = 1024' kuzia/app/src/main/cpp/samp/game/Models/ModelInfo.h
+          grep -nF 'VOSTOK ModelCD:' kuzia/app/src/main/cpp/samp/game/Streaming.cpp
+          grep -nF 'VOSTOK PedStore extended:' kuzia/app/src/main/cpp/samp/game/Models/ModelInfo.cpp
+          grep -nF 'VOSTOK VehicleStore extended:' kuzia/app/src/main/cpp/samp/game/Models/ModelInfo.cpp
+          grep -nF 'VOSTOK ClumpStore extended:' kuzia/app/src/main/cpp/samp/game/Models/ModelInfo.cpp
+          grep -nF 'InstallCdStreamTrace();' kuzia/app/src/main/cpp/samp/game/hooks.cpp
+          grep -nF '/storage/emulated/0/GTA_CRIME_TEST/' kuzia/app/src/main/cpp/samp/main.cpp
+
+      - name: Replace trace with CdStream Guard 001
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cp .github/diagnostics/CdStreamTrace.cpp kuzia/app/src/main/cpp/samp/CdStreamTrace.cpp
+          grep -nF 'INVALID_CDREAD stage=QUEUE' kuzia/app/src/main/cpp/samp/CdStreamTrace.cpp
+          grep -nF 'MODEL596 stage=' kuzia/app/src/main/cpp/samp/CdStreamTrace.cpp
+          grep -nF 'guard=CDSTREAM_GUARD_001' kuzia/app/src/main/cpp/samp/CdStreamTrace.cpp
+
+          cat >> kuzia/VOSTOK_SOURCE_STATE.md <<'EOF'
+
+          ## CdStream Guard 001 — 2026-09-16
+          Device evidence from diagnostic Run 35109806453:
+          - model 596 entered channel 0 with CStreamingInfo cdPosn=0 and cdSize=0 while load state was 3;
+          - the queued sector count became 1792970800;
+          - 1792970800 * 2048 wrapped the signed int byte argument to -192839680;
+          - fread then received the sign-extended count 18446744073516711936 and Android Bionic FORTIFY aborted the CdStream thread;
+          - the actual stream fd was /storage/emulated/0/GTA_CRIME_TEST/texdb/gta3.img, size 84905984 bytes;
+          - normal GoldCrime models immediately before the failure read gta3.img successfully.
+
+          Guard 001 preserves the exact Run 35109806453 source baseline and adds only fail-closed CdStream validation plus model-596 tracing:
+          - reject zero-sector, signed-int byte-overflow, and queued zero-CD-range requests before native CdStreamRead;
+          - secondary OS_FileRead guard for non-positive byte counts;
+          - secondary fread guard for SSIZE/range overflow on active CdStream reads;
+          - log INVALID_CDREAD and MODEL596 markers.
+
+          No byte-count clamping is used. PedStore 512, VehicleStore 1024, ClumpStore 1024, ModelCD, PVR/root fixes, and ColAccel diagnostic prerequisite are unchanged.
+          This is an experimental Candidate and is NOT a MASTER promotion.
+          EOF
+
+      - name: Upload source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: VOSTOK_KUZIA_CRIME_CDSTREAM_GUARD001_SOURCE
+          path: kuzia
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+          cache-dependency-path: kuzia/**/*.gradle*
+
+      - name: Install Android 36, NDK 26.2 and CMake
+        shell: bash
+        run: |
+          set -euxo pipefail
+          SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(command -v sdkmanager)"
+          fi
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" \
+            "platform-tools" \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "ndk;26.2.11394342" \
+            "cmake;3.22.1"
+
+      - name: Build CdStream Guard 001 APK
+        working-directory: kuzia
+        shell: bash
+        run: |
+          set -euxo pipefail
+          chmod +x gradlew
+          rm -rf app/.cxx app/build/intermediates/cxx app/build/intermediates/merged_native_libs
+          ./gradlew :app:assembleDebug --stacktrace --no-daemon --rerun-tasks
+
+      - name: Verify rebuilt guard and prepare named APK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          APK="$(find kuzia/app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' | head -1)"
+          test -n "$APK"
+          unzip -p "$APK" lib/arm64-v8a/libsamp.so > /tmp/libsamp.so
+          test -s /tmp/libsamp.so
+
+          strings /tmp/libsamp.so | grep -F '/storage/emulated/0/GTA_CRIME_TEST/' | head -20
+          strings /tmp/libsamp.so | grep -F 'VOSTOK ModelCD: model='
+          strings /tmp/libsamp.so | grep -F 'VOSTOK PedStore extended:'
+          strings /tmp/libsamp.so | grep -F 'VOSTOK VehicleStore extended:'
+          strings /tmp/libsamp.so | grep -F 'VOSTOK ClumpStore extended:'
+          strings /tmp/libsamp.so | grep -F 'INVALID_CDREAD stage=QUEUE'
+          strings /tmp/libsamp.so | grep -F 'MODEL596 stage='
+          strings /tmp/libsamp.so | grep -F 'guard=CDSTREAM_GUARD_001'
+
+          if strings /tmp/libsamp.so | grep -F '/storage/emulated/0/GTA/'; then
+            echo 'ERROR: rebuilt libsamp.so still contains legacy /storage/emulated/0/GTA/'
+            exit 1
+          fi
+
+          cp "$APK" VOSTOK_KUZIA_GOLDCRIME_CDSTREAM_GUARD001.apk
+          sha256sum /tmp/libsamp.so VOSTOK_KUZIA_GOLDCRIME_CDSTREAM_GUARD001.apk
+          stat -c '%n %s bytes' VOSTOK_KUZIA_GOLDCRIME_CDSTREAM_GUARD001.apk
+
+      - name: Upload APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: KUZIA_GOLDCRIME_CDSTREAM_GUARD001
+          path: VOSTOK_KUZIA_GOLDCRIME_CDSTREAM_GUARD001.apk
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload rebuilt libsamp
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: KUZIA_GOLDCRIME_CDSTREAM_GUARD001_LIBSAMP
+          path: /tmp/libsamp.so
+          if-no-files-found: error
+          retention-days: 7
