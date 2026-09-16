@@ -48,19 +48,24 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
+          def joined(lines):
+              return "\n".join(lines)
+
           main = Path('john/app/src/main/cpp/multiplayer/samp/main.cpp')
           text = main.read_text(encoding='utf-8')
 
           old_endpoint = 'pNetGame = new CNetGame("gta-irz.com", 7777, "Luca_Runky", "");'
-          new_endpoint = '''if (!pSettings) {
-                    FLog("Network init aborted: settings are unavailable");
-                    return;
-                }
-                pNetGame = new CNetGame(
-                        pSettings->Get().szHost,
-                        pSettings->Get().iPort,
-                        pSettings->Get().szNickName,
-                        pSettings->Get().szPassword);'''
+          new_endpoint = joined([
+              'if (!pSettings) {',
+              '            FLog("Network init aborted: settings are unavailable");',
+              '            return;',
+              '        }',
+              '        pNetGame = new CNetGame(',
+              '                pSettings->Get().szHost,',
+              '                pSettings->Get().iPort,',
+              '                pSettings->Get().szNickName,',
+              '                pSettings->Get().szPassword);',
+          ])
           if old_endpoint not in text:
               raise SystemExit('Expected hard-coded endpoint not found')
           text = text.replace(old_endpoint, new_endpoint, 1)
@@ -74,37 +79,41 @@ jobs:
                   raise SystemExit(f'Expected init call not found: {old!r}')
               text = text.replace(old, new, 1)
 
-          old_gui = '''void InitGui()
-{
-\t// new voice
-\tPlugin::OnPluginLoad();
-\tPlugin::OnSampLoad();
-
-\tstd::string font_path = BuildStoragePath(string_format("SAMP/fonts/%s", FONT_NAME).c_str());
-\tpUI = new UI(ImVec2(RsGlobal->maximumWidth, RsGlobal->maximumHeight), font_path.c_str());
-\tpUI->initialize();
-\tpUI->performLayout();
-}'''
-          new_gui = '''void InitGui()
-{
-    FLog("VOSTOK GUI DIAG: InitGui begin");
-    Plugin::OnPluginLoad();
-    FLog("VOSTOK GUI DIAG: OnPluginLoad done");
-    Plugin::OnSampLoad();
-    FLog("VOSTOK GUI DIAG: OnSampLoad done");
-
-    std::string font_path = BuildStoragePath(string_format("SAMP/fonts/%s", FONT_NAME).c_str());
-    FLog("VOSTOK GUI DIAG: requested font %s", font_path.c_str());
-    pUI = new UI(ImVec2(RsGlobal->maximumWidth, RsGlobal->maximumHeight), font_path.c_str());
-    FLog("VOSTOK GUI DIAG: UI allocated %p", pUI);
-    if (!pUI || !pUI->initialize()) {
-        FLog("VOSTOK GUI DIAG: UI initialize failed");
-        return;
-    }
-    FLog("VOSTOK GUI DIAG: UI initialize PASS");
-    pUI->performLayout();
-    FLog("VOSTOK GUI DIAG: performLayout PASS");
-}'''
+          old_gui = joined([
+              'void InitGui()',
+              '{',
+              '\t// new voice',
+              '\tPlugin::OnPluginLoad();',
+              '\tPlugin::OnSampLoad();',
+              '',
+              '\tstd::string font_path = BuildStoragePath(string_format("SAMP/fonts/%s", FONT_NAME).c_str());',
+              '\tpUI = new UI(ImVec2(RsGlobal->maximumWidth, RsGlobal->maximumHeight), font_path.c_str());',
+              '\tpUI->initialize();',
+              '\tpUI->performLayout();',
+              '}',
+          ])
+          new_gui = joined([
+              'void InitGui()',
+              '{',
+              '    FLog("VOSTOK GUI DIAG: InitGui begin");',
+              '    Plugin::OnPluginLoad();',
+              '    FLog("VOSTOK GUI DIAG: OnPluginLoad done");',
+              '    Plugin::OnSampLoad();',
+              '    FLog("VOSTOK GUI DIAG: OnSampLoad done");',
+              '',
+              '    std::string font_path = BuildStoragePath(string_format("SAMP/fonts/%s", FONT_NAME).c_str());',
+              '    FLog("VOSTOK GUI DIAG: requested font %s", font_path.c_str());',
+              '    pUI = new UI(ImVec2(RsGlobal->maximumWidth, RsGlobal->maximumHeight), font_path.c_str());',
+              '    FLog("VOSTOK GUI DIAG: UI allocated %p", pUI);',
+              '    if (!pUI || !pUI->initialize()) {',
+              '        FLog("VOSTOK GUI DIAG: UI initialize failed");',
+              '        return;',
+              '    }',
+              '    FLog("VOSTOK GUI DIAG: UI initialize PASS");',
+              '    pUI->performLayout();',
+              '    FLog("VOSTOK GUI DIAG: performLayout PASS");',
+              '}',
+          ])
           if old_gui not in text:
               raise SystemExit('Expected InitGui block not found')
           text = text.replace(old_gui, new_gui, 1)
@@ -119,13 +128,15 @@ jobs:
           h = h.replace(old, new, 1)
 
           old_load = '    TextureDatabaseRuntime::Load("samp", false, TextureDatabaseFormat::DF_Default);'
-          new_load = '''    std::string sampTxt = BuildStoragePath("texdb/samp/samp.txt");
-    if (access(sampTxt.c_str(), R_OK) == 0) {
-        FLog("VOSTOK GUI DIAG: loading external samp texture DB");
-        TextureDatabaseRuntime::Load("samp", false, TextureDatabaseFormat::DF_Default);
-    } else {
-        FLog("VOSTOK GUI DIAG: samp texture DB absent, skip: %s", sampTxt.c_str());
-    }'''
+          new_load = joined([
+              '    std::string sampTxt = BuildStoragePath("texdb/samp/samp.txt");',
+              '    if (access(sampTxt.c_str(), R_OK) == 0) {',
+              '        FLog("VOSTOK GUI DIAG: loading external samp texture DB");',
+              '        TextureDatabaseRuntime::Load("samp", false, TextureDatabaseFormat::DF_Default);',
+              '    } else {',
+              '        FLog("VOSTOK GUI DIAG: samp texture DB absent, skip: %s", sampTxt.c_str());',
+              '    }',
+          ])
           if old_load not in h:
               raise SystemExit('Expected samp texture load not found')
           h = h.replace(old_load, new_load, 1)
@@ -135,45 +146,48 @@ jobs:
 
           wrap = Path('john/app/src/main/cpp/multiplayer/samp/GUI/imguiwrapper.cpp')
           w = wrap.read_text(encoding='utf-8')
-          old_font = '''    ImFont* font = io.Fonts->AddFontFromFileTTF(m_fontPath.c_str(),
-                                                UISettings::fontSize(), &fontCfg, ranges);
-
-    if (font == nullptr)
-    {
-        Log::addParameter("font", font);
-        return false;
-    }
-
-    createFontTexture();'''
-          new_font = '''    ImFont* font = io.Fonts->AddFontFromFileTTF(m_fontPath.c_str(),
-                                                UISettings::fontSize(), &fontCfg, ranges);
-
-    if (font == nullptr)
-    {
-        FLog("VOSTOK GUI DIAG: external font missing/unreadable: %s", m_fontPath.c_str());
-        const char* systemFont = "/system/fonts/Roboto-Bold.ttf";
-        font = io.Fonts->AddFontFromFileTTF(systemFont,
-                                            UISettings::fontSize(), &fontCfg, ranges);
-        if (font != nullptr)
-            FLog("VOSTOK GUI DIAG: system font fallback PASS: %s", systemFont);
-    }
-
-    if (font == nullptr)
-    {
-        FLog("VOSTOK GUI DIAG: system font unavailable, using ImGui default font");
-        font = io.Fonts->AddFontDefault(&fontCfg);
-    }
-
-    if (font == nullptr)
-    {
-        FLog("VOSTOK GUI DIAG: all font fallbacks failed");
-        return false;
-    }
-
-    if (!createFontTexture()) {
-        FLog("VOSTOK GUI DIAG: createFontTexture failed");
-        return false;
-    }'''
+          old_font = joined([
+              '    ImFont* font = io.Fonts->AddFontFromFileTTF(m_fontPath.c_str(),',
+              '                                                UISettings::fontSize(), &fontCfg, ranges);',
+              '',
+              '    if (font == nullptr)',
+              '    {',
+              '        Log::addParameter("font", font);',
+              '        return false;',
+              '    }',
+              '',
+              '    createFontTexture();',
+          ])
+          new_font = joined([
+              '    ImFont* font = io.Fonts->AddFontFromFileTTF(m_fontPath.c_str(),',
+              '                                                UISettings::fontSize(), &fontCfg, ranges);',
+              '',
+              '    if (font == nullptr)',
+              '    {',
+              '        FLog("VOSTOK GUI DIAG: external font missing/unreadable: %s", m_fontPath.c_str());',
+              '        const char* systemFont = "/system/fonts/Roboto-Bold.ttf";',
+              '        font = io.Fonts->AddFontFromFileTTF(systemFont, UISettings::fontSize(), &fontCfg, ranges);',
+              '        if (font != nullptr)',
+              '            FLog("VOSTOK GUI DIAG: system font fallback PASS: %s", systemFont);',
+              '    }',
+              '',
+              '    if (font == nullptr)',
+              '    {',
+              '        FLog("VOSTOK GUI DIAG: system font unavailable, using ImGui default font");',
+              '        font = io.Fonts->AddFontDefault(&fontCfg);',
+              '    }',
+              '',
+              '    if (font == nullptr)',
+              '    {',
+              '        FLog("VOSTOK GUI DIAG: all font fallbacks failed");',
+              '        return false;',
+              '    }',
+              '',
+              '    if (!createFontTexture()) {',
+              '        FLog("VOSTOK GUI DIAG: createFontTexture failed");',
+              '        return false;',
+              '    }',
+          ])
           if old_font not in w:
               raise SystemExit('Expected ImGui font block not found')
           w = w.replace(old_font, new_font, 1)
@@ -181,12 +195,13 @@ jobs:
 
           assets = Path('john/app/src/main/assets')
           assets.mkdir(parents=True, exist_ok=True)
-          (assets / 'settings.ini').write_text('''[client]\nname=AndroidUser\nhost=127.0.0.1\nport=7777\npassword=\nversion=0.3.7\nautoaim=false\n\n[debug]\ndebug=false\nonline=true\n\n[gui]\nFont=arial.ttf\nFontSize=30\nFontOutline=2\nandroidkeyboard=false\nVoiceChatEnable=false\nfps=0\nChatMaxMessages=6\nFPSLimit=60\nDialog=true\n''', encoding='utf-8')
+          settings = '[client]\nname=AndroidUser\nhost=127.0.0.1\nport=7777\npassword=\nversion=0.3.7\nautoaim=false\n\n[debug]\ndebug=false\nonline=true\n\n[gui]\nFont=arial.ttf\nFontSize=30\nFontOutline=2\nandroidkeyboard=false\nVoiceChatEnable=false\nfps=0\nChatMaxMessages=6\nFPSLimit=60\nDialog=true\n'
+          (assets / 'settings.ini').write_text(settings, encoding='utf-8')
           PY
 
           grep -n -A28 -B3 'void InitGui' john/app/src/main/cpp/multiplayer/samp/main.cpp
-          grep -n -A30 -B3 'AddFontFromFileTTF' john/app/src/main/cpp/multiplayer/samp/GUI/imguiwrapper.cpp
-          grep -n -A24 -B3 'CGame__InitialiseRenderWare_hook' john/app/src/main/cpp/multiplayer/samp/hooks/Hooks.cpp
+          grep -n -A32 -B3 'AddFontFromFileTTF' john/app/src/main/cpp/multiplayer/samp/GUI/imguiwrapper.cpp
+          grep -n -A28 -B3 'CGame__InitialiseRenderWare_hook' john/app/src/main/cpp/multiplayer/samp/hooks/Hooks.cpp
 
       - name: Verify source profile
         shell: bash
@@ -200,6 +215,7 @@ jobs:
       - name: Remove duplicate packaged native libs
         shell: bash
         run: |
+          set -euxo pipefail
           rm -f john/app/src/main/jniLibs/arm64-v8a/libbass.so john/app/src/main/jniLibs/arm64-v8a/libbass_ssl.so john/app/src/main/jniLibs/arm64-v8a/libGlossHook.so
 
       - name: Build APK
@@ -219,7 +235,8 @@ jobs:
           APK="$(find john/app/build/outputs/apk/debug -type f -name '*.apk' | head -n 1)"
           test -n "$APK"
           test -s "$APK"
-          rm -rf /tmp/john-apk && mkdir -p /tmp/john-apk
+          rm -rf /tmp/john-apk
+          mkdir -p /tmp/john-apk
           unzip -q "$APK" -d /tmp/john-apk
           test -f /tmp/john-apk/lib/arm64-v8a/libsamp.so
           test -f /tmp/john-apk/lib/arm64-v8a/libGame.so
