@@ -1,4 +1,4 @@
-name: Build Kuzia + Gold Crime Player PVR Bridge
+name: Build Kuzia + Gold Crime ModelCD Fix
 
 on:
   push:
@@ -68,9 +68,7 @@ jobs:
           fi
 
           # CRIME has texdb/player only as PVR, while this GTA 2.11 runtime asks
-          # NvFOpen for player.dxt.{tmb,dat,toc}. Add a deliberately narrow
-          # experimental bridge at the file-open layer. Do NOT rename cache files
-          # and do NOT affect mobile/txd/gta3/gta_int, which already load as ETC.
+          # NvFOpen for player.dxt.{tmb,dat,toc}. Keep the proven narrow bridge.
           python3 - <<'PY'
           from pathlib import Path
 
@@ -79,7 +77,7 @@ jobs:
 
           old = '''    LOGI("NvFOpen %s", r1);\n    strcpy(lastFile, r1);\n    g_pszStorage = "/storage/emulated/0/GTA_CRIME_TEST/";\n    static char path[255]{};\n    memset(path, 0, sizeof(path));\n\n    if (strstr(r1, "emulated") != NULL)\n    {\n        // text contains "emulated"\n        sprintf(path, "%s", r1);\n    }\n    else {\n\n        sprintf(path, "%s%s", g_pszStorage, r1);\n    }\n'''
 
-          new = '''    LOGI("NvFOpen %s", r1);\n    strcpy(lastFile, r1);\n    g_pszStorage = "/storage/emulated/0/GTA_CRIME_TEST/";\n    static char path[255]{};\n    memset(path, 0, sizeof(path));\n\n    const char* storageRequest = r1;\n    if (!strcmp(r1, "texdb/player/player.dxt.tmb")) {\n        storageRequest = "texdb/player/player.pvr.tmb";\n        LOGI("VOSTOK CRIME bridge: player.dxt.tmb -> player.pvr.tmb");\n    }\n    else if (!strcmp(r1, "texdb/player/player.dxt.dat")) {\n        storageRequest = "texdb/player/player.pvr.dat";\n        LOGI("VOSTOK CRIME bridge: player.dxt.dat -> player.pvr.dat");\n    }\n    else if (!strcmp(r1, "texdb/player/player.dxt.toc")) {\n        storageRequest = "texdb/player/player.pvr.toc";\n        LOGI("VOSTOK CRIME bridge: player.dxt.toc -> player.pvr.toc");\n    }\n\n    if (strstr(storageRequest, "emulated") != NULL)\n    {\n        // text contains "emulated"\n        sprintf(path, "%s", storageRequest);\n    }\n    else {\n\n        sprintf(path, "%s%s", g_pszStorage, storageRequest);\n    }\n'''
+          new = '''    LOGI("NvFOpen %s", r1);\n    strcpy(lastFile, r1);\n    g_pszStorage = "/storage/emulated/0/GTA_CRIME_TEST/";\n    static char path[255]{};\n    memset(path, 0, sizeof(path));\n\n    const char* storageRequest = r1;\n    if (!strcmp(r1, "texdb/player/player.dxt.tmb")) {\n        storageRequest = "texdb/player/player.pvr.tmb";\n        LOGI("VOSTOK CRIME bridge: player.dxt.tmb -> player.pvr.tmb");\n    }\n    else if (!strcmp(r1, "texdb/player/player.dxt.dat")) {\n        storageRequest = "texdb/player/player.pvr.dat";\n        LOGI("VOSTOK CRIME bridge: player.dxt.dat -> player.pvr.dat");\n    }\n    else if (!strcmp(r1, "texdb/player/player.dxt.toc")) {\n        storageRequest = "texdb/player/player.pvr.toc";\n        LOGI("VOSTOK CRIME bridge: player.dxt.toc -> player.pvr.toc");\n    }\n\n    if (strstr(storageRequest, "emulated") != NULL)\n    {\n        sprintf(path, "%s", storageRequest);\n    }\n    else {\n        sprintf(path, "%s%s", g_pszStorage, storageRequest);\n    }\n'''
 
           if old not in s:
               raise SystemExit('NvFOpen storage block not found; refusing unsafe patch')
@@ -87,6 +85,36 @@ jobs:
           p.write_text(s.replace(old, new, 1), encoding='utf-8')
           PY
 
+          # GTA 2.11 CStreaming::GetModelCDName can return 0x1 when its internal
+          # path parsing does not find a backslash. That invalid pointer is then
+          # copied by CTxdStore::AddTxdSlot and causes the peds.ide SIGSEGV.
+          # Replace only the DB-name resolver with a separator-safe implementation
+          # based on the model's actual IMG archive registered in ms_files.
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('kuzia/app/src/main/cpp/samp/game/Streaming.cpp')
+          s = p.read_text(encoding='utf-8')
+
+          old_fn = '''char *CStreaming::GetModelCDName(int32 index) {\n    return CHook::CallFunction<char*>(g_libGTASA + 0x3AD8E4, index);\n}\n'''
+
+          new_fn = '''char *CStreaming::GetModelCDName(int32 index) {\n    static thread_local char dbName[20]{};\n\n    auto& info = CStreaming::GetInfo(index);\n    if (!info.HasCdPosnAndSize()) {\n        strcpy(dbName, "txd");\n        Log("VOSTOK ModelCD: model=%d no-cd -> %s", index, dbName);\n        return dbName;\n    }\n\n    const uint8 imgId = info.m_nImgId;\n    if (imgId >= TOTAL_IMG_ARCHIVES || !ms_files[imgId].m_szName[0]) {\n        strcpy(dbName, "txd");\n        Log("VOSTOK ModelCD: model=%d invalid-img=%u -> %s", index, (unsigned)imgId, dbName);\n        return dbName;\n    }\n\n    const char* archive = ms_files[imgId].m_szName;\n    const char* base = archive;\n    for (const char* it = archive; *it; ++it) {\n        if (*it == '\\\\' || *it == '/')\n            base = it + 1;\n    }\n\n    size_t n = 0;\n    while (base[n] && base[n] != '.' && n < sizeof(dbName) - 1) {\n        char c = base[n];\n        if (c >= 'A' && c <= 'Z')\n            c = static_cast<char>(c + ('a' - 'A'));\n        dbName[n++] = c;\n    }\n    dbName[n] = '\\0';\n\n    if (!n)\n        strcpy(dbName, "txd");\n\n    Log("VOSTOK ModelCD: model=%d img=%u archive=%s db=%s",\n        index, (unsigned)imgId, archive, dbName);\n    return dbName;\n}\n'''
+
+          if old_fn not in s:
+              raise SystemExit('GetModelCDName wrapper not found; refusing unsafe patch')
+          s = s.replace(old_fn, new_fn, 1)
+
+          old_hook = '    CHook::Redirect("_ZN10CStreaming13InitImageListEv", &CStreaming::InitImageList);\n'
+          new_hook = old_hook + '    CHook::Redirect("_ZN10CStreaming14GetModelCDNameEi", &CStreaming::GetModelCDName);\n'
+          if old_hook not in s:
+              raise SystemExit('Streaming hook insertion point not found')
+          s = s.replace(old_hook, new_hook, 1)
+
+          p.write_text(s, encoding='utf-8')
+          PY
+
+          grep -nF 'VOSTOK ModelCD' kuzia/app/src/main/cpp/samp/game/Streaming.cpp
+          grep -nF '_ZN10CStreaming14GetModelCDNameEi' kuzia/app/src/main/cpp/samp/game/Streaming.cpp
           grep -nF 'VOSTOK CRIME bridge' kuzia/app/src/main/cpp/samp/game/hooks.cpp
 
           # START guard includes the exact PVR player DB this experiment needs.
@@ -101,7 +129,7 @@ jobs:
 
           old = '''    private void startGame() {\n        try {\n            Log.d("MainActivity", "Starting game");\n            Intent gameIntent = new Intent(MainActivity.this, SAMP.class);\n            startActivity(gameIntent);\n        } catch (Exception e) {\n            Log.e("MainActivity", "Error starting game: " + e.getMessage());\n        }\n    }\n'''
 
-          new = '''    private boolean hasGameCache() {\n        File gameDir = new File("/storage/emulated/0/GTA_CRIME_TEST");\n        return gameDir.isDirectory()\n                && new File(gameDir, "data").isDirectory()\n                && new File(gameDir, "texdb").isDirectory()\n                && new File(gameDir, "models").isDirectory()\n                && new File(gameDir, "SAMP").isDirectory()\n                && new File(gameDir, "SAMP/settings.ini").isFile()\n                && new File(gameDir, "texdb/player/player.txt").isFile()\n                && new File(gameDir, "texdb/player/player.pvr.tmb").isFile()\n                && new File(gameDir, "texdb/player/player.pvr.dat").isFile()\n                && new File(gameDir, "texdb/player/player.pvr.toc").isFile();\n    }\n\n    private void startGame() {\n        try {\n            if (!hasGameCache()) {\n                Toast.makeText(this,\n                        "Кэш CRIME неполный. Нужны GTA_CRIME_TEST и player.pvr.*",\n                        Toast.LENGTH_LONG).show();\n                return;\n            }\n            Toast.makeText(this, "Тест: CRIME player PVR bridge", Toast.LENGTH_SHORT).show();\n            startActivity(new Intent(MainActivity.this, SAMP.class));\n        } catch (Exception e) {\n            Log.e("MainActivity", "Error starting game: " + e.getMessage(), e);\n            Toast.makeText(this, "Ошибка запуска игры: " + e.getClass().getSimpleName(), Toast.LENGTH_LONG).show();\n        }\n    }\n'''
+          new = '''    private boolean hasGameCache() {\n        File gameDir = new File("/storage/emulated/0/GTA_CRIME_TEST");\n        return gameDir.isDirectory()\n                && new File(gameDir, "data").isDirectory()\n                && new File(gameDir, "texdb").isDirectory()\n                && new File(gameDir, "models").isDirectory()\n                && new File(gameDir, "SAMP").isDirectory()\n                && new File(gameDir, "SAMP/settings.ini").isFile()\n                && new File(gameDir, "texdb/player/player.txt").isFile()\n                && new File(gameDir, "texdb/player/player.pvr.tmb").isFile()\n                && new File(gameDir, "texdb/player/player.pvr.dat").isFile()\n                && new File(gameDir, "texdb/player/player.pvr.toc").isFile();\n    }\n\n    private void startGame() {\n        try {\n            if (!hasGameCache()) {\n                Toast.makeText(this,\n                        "Кэш CRIME неполный. Нужны GTA_CRIME_TEST и player.pvr.*",\n                        Toast.LENGTH_LONG).show();\n                return;\n            }\n            Toast.makeText(this, "Тест: CRIME ModelCD fix", Toast.LENGTH_SHORT).show();\n            startActivity(new Intent(MainActivity.this, SAMP.class));\n        } catch (Exception e) {\n            Log.e("MainActivity", "Error starting game: " + e.getMessage(), e);\n            Toast.makeText(this, "Ошибка запуска игры: " + e.getClass().getSimpleName(), Toast.LENGTH_LONG).show();\n        }\n    }\n'''
 
           if old not in s:
               raise SystemExit('startGame block not found')
@@ -113,7 +141,7 @@ jobs:
           rm -f kuzia/app/src/main/jniLibs/arm64-v8a/libbass_ssl.so
 
           cat > kuzia/VOSTOK_SOURCE_STATE.md <<'EOF'
-          # VOSTOK / Kuzia + CRIME player PVR bridge experiment
+          # VOSTOK / Kuzia + CRIME ModelCD experiment
 
           Upstream: kuzia15/SAMP-Mobile
           Upstream ref: 5e531514a0bbb3d56b1a72e51fa44b18cfaf2ee2
@@ -124,18 +152,19 @@ jobs:
           - Java/native cache root unified at /storage/emulated/0/GTA_CRIME_TEST/.
           - No source-side legacy /storage/emulated/0/GTA/ root allowed.
           - Duplicate BASS jniLibs removed because CMake supplies them.
+          - CRIME player DXT requests bridged narrowly to existing player PVR files.
 
           Current isolated experiment:
-          - Only texdb/player DXT file-open requests are redirected to existing PVR files.
-          - mobile/txd/gta3/gta_int remain untouched and continue using the formats requested by libGame.
-          - This tests whether the runtime can consume CRIME's player PVR database through its current DXT request path.
+          - Replace only CStreaming::GetModelCDName with a safe archive-name resolver.
+          - The resolver accepts both backslash and slash separators and derives DB name from ms_files[imgId].
+          - This targets the verified peds.ide crash path GetModelCDName -> SetTexDictionary -> AddTxdSlot -> strcpy(0x1).
           - This is NOT a MASTER promotion and must pass device smoke.
           EOF
 
       - name: Upload source snapshot
         uses: actions/upload-artifact@v4
         with:
-          name: VOSTOK_KUZIA_CRIME_PLAYER_PVR_SOURCE
+          name: VOSTOK_KUZIA_CRIME_MODELCD_SOURCE
           path: kuzia
           if-no-files-found: error
           retention-days: 7
@@ -164,7 +193,7 @@ jobs:
             "ndk;26.2.11394342" \
             "cmake;3.22.1"
 
-      - name: Build player-PVR bridge APK
+      - name: Build ModelCD-fix APK
         working-directory: kuzia
         shell: bash
         run: |
@@ -184,7 +213,7 @@ jobs:
 
           strings /tmp/libsamp.so | grep -F '/storage/emulated/0/GTA_CRIME_TEST/' | head -20
           strings /tmp/libsamp.so | grep -F 'VOSTOK CRIME bridge: player.dxt.tmb -> player.pvr.tmb'
-          strings /tmp/libsamp.so | grep -F 'texdb/player/player.pvr.dat'
+          strings /tmp/libsamp.so | grep -F 'VOSTOK ModelCD: model='
 
           if strings /tmp/libsamp.so | grep -F '/storage/emulated/0/GTA/'; then
             echo 'ERROR: rebuilt libsamp.so still contains legacy /storage/emulated/0/GTA/'
@@ -197,7 +226,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: KUZIA_GOLDCRIME_PLAYER_PVR_BRIDGE
+          name: KUZIA_GOLDCRIME_MODELCD_FIX
           path: kuzia/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 7
@@ -206,7 +235,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: KUZIA_GOLDCRIME_PLAYER_PVR_BRIDGE_LIBSAMP
+          name: KUZIA_GOLDCRIME_MODELCD_FIX_LIBSAMP
           path: /tmp/libsamp.so
           if-no-files-found: error
           retention-days: 7
