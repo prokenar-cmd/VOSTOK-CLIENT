@@ -1,4 +1,4 @@
-name: Build Kuzia + Gold Crime Unified Root
+name: Build Kuzia + Gold Crime Player PVR Bridge
 
 on:
   push:
@@ -20,12 +20,12 @@ jobs:
           path: kuzia
           persist-credentials: false
 
-      - name: Apply CRIME unified cache-root patches
+      - name: Apply CRIME compatibility patches
         shell: bash
         run: |
           set -euxo pipefail
 
-          # Upstream Linux build fixes already proven in earlier experiment runs.
+          # Proven Linux filename-case fixes.
           sed -i 's#samp_widgets/playerTabList.h#samp_widgets/playertablist.h#g' \
             kuzia/app/src/main/cpp/samp/gui/gui.h
           sed -i 's#"RGBA.h"#"rgba.h"#g' \
@@ -35,10 +35,7 @@ jobs:
           sed -i 's#new File(documentsDir, "VICE")#new File(documentsDir, "GTA_CRIME_TEST")#g' \
             kuzia/app/src/main/java/com/rockstargames/oswrapper/GameActivityBase.java
 
-          # Native code contains several independent hardcoded /GTA/ roots
-          # (settings.cpp, main.cpp, game/hooks.cpp and possibly more). Replace
-          # the exact legacy root everywhere under app/src/main so Java and every
-          # native loader use the same CRIME test cache.
+          # Keep every source-side storage root unified on GTA_CRIME_TEST.
           python3 - <<'PY'
           from pathlib import Path
 
@@ -65,16 +62,34 @@ jobs:
               raise SystemExit('No legacy /storage/emulated/0/GTA/ roots were found to patch')
           PY
 
-          # Fail the build if any exact legacy /GTA root remains in source.
           if grep -R --binary-files=without-match -nE '/storage/emulated/0/GTA(/|\")' kuzia/app/src/main; then
             echo 'ERROR: legacy GTA cache root still present in source'
             exit 1
           fi
 
-          grep -R --binary-files=without-match -nF '/storage/emulated/0/GTA_CRIME_TEST/' \
-            kuzia/app/src/main/cpp kuzia/app/src/main/java | head -100
+          # CRIME has texdb/player only as PVR, while this GTA 2.11 runtime asks
+          # NvFOpen for player.dxt.{tmb,dat,toc}. Add a deliberately narrow
+          # experimental bridge at the file-open layer. Do NOT rename cache files
+          # and do NOT affect mobile/txd/gta3/gta_int, which already load as ETC.
+          python3 - <<'PY'
+          from pathlib import Path
 
-          # START guard: do not enter native GTA with an incomplete CRIME cache.
+          p = Path('kuzia/app/src/main/cpp/samp/game/hooks.cpp')
+          s = p.read_text(encoding='utf-8')
+
+          old = '''    LOGI("NvFOpen %s", r1);\n    strcpy(lastFile, r1);\n    g_pszStorage = "/storage/emulated/0/GTA_CRIME_TEST/";\n    static char path[255]{};\n    memset(path, 0, sizeof(path));\n\n    if (strstr(r1, "emulated") != NULL)\n    {\n        // text contains "emulated"\n        sprintf(path, "%s", r1);\n    }\n    else {\n\n        sprintf(path, "%s%s", g_pszStorage, r1);\n    }\n'''
+
+          new = '''    LOGI("NvFOpen %s", r1);\n    strcpy(lastFile, r1);\n    g_pszStorage = "/storage/emulated/0/GTA_CRIME_TEST/";\n    static char path[255]{};\n    memset(path, 0, sizeof(path));\n\n    const char* storageRequest = r1;\n    if (!strcmp(r1, "texdb/player/player.dxt.tmb")) {\n        storageRequest = "texdb/player/player.pvr.tmb";\n        LOGI("VOSTOK CRIME bridge: player.dxt.tmb -> player.pvr.tmb");\n    }\n    else if (!strcmp(r1, "texdb/player/player.dxt.dat")) {\n        storageRequest = "texdb/player/player.pvr.dat";\n        LOGI("VOSTOK CRIME bridge: player.dxt.dat -> player.pvr.dat");\n    }\n    else if (!strcmp(r1, "texdb/player/player.dxt.toc")) {\n        storageRequest = "texdb/player/player.pvr.toc";\n        LOGI("VOSTOK CRIME bridge: player.dxt.toc -> player.pvr.toc");\n    }\n\n    if (strstr(storageRequest, "emulated") != NULL)\n    {\n        // text contains "emulated"\n        sprintf(path, "%s", storageRequest);\n    }\n    else {\n\n        sprintf(path, "%s%s", g_pszStorage, storageRequest);\n    }\n'''
+
+          if old not in s:
+              raise SystemExit('NvFOpen storage block not found; refusing unsafe patch')
+
+          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+          PY
+
+          grep -nF 'VOSTOK CRIME bridge' kuzia/app/src/main/cpp/samp/game/hooks.cpp
+
+          # START guard includes the exact PVR player DB this experiment needs.
           python3 - <<'PY'
           from pathlib import Path
 
@@ -86,7 +101,7 @@ jobs:
 
           old = '''    private void startGame() {\n        try {\n            Log.d("MainActivity", "Starting game");\n            Intent gameIntent = new Intent(MainActivity.this, SAMP.class);\n            startActivity(gameIntent);\n        } catch (Exception e) {\n            Log.e("MainActivity", "Error starting game: " + e.getMessage());\n        }\n    }\n'''
 
-          new = '''    private boolean hasGameCache() {\n        File gameDir = new File("/storage/emulated/0/GTA_CRIME_TEST");\n        return gameDir.isDirectory()\n                && new File(gameDir, "data").isDirectory()\n                && new File(gameDir, "texdb").isDirectory()\n                && new File(gameDir, "models").isDirectory()\n                && new File(gameDir, "SAMP").isDirectory()\n                && new File(gameDir, "SAMP/settings.ini").isFile();\n    }\n\n    private void startGame() {\n        try {\n            if (!hasGameCache()) {\n                Toast.makeText(this,\n                        "Кэш CRIME неполный. Нужен /storage/emulated/0/GTA_CRIME_TEST/ с SAMP/settings.ini",\n                        Toast.LENGTH_LONG).show();\n                return;\n            }\n            Toast.makeText(this, "Тест: запускаем Kuzia с кэшем CRIME", Toast.LENGTH_SHORT).show();\n            startActivity(new Intent(MainActivity.this, SAMP.class));\n        } catch (Exception e) {\n            Log.e("MainActivity", "Error starting game: " + e.getMessage(), e);\n            Toast.makeText(this, "Ошибка запуска игры: " + e.getClass().getSimpleName(), Toast.LENGTH_LONG).show();\n        }\n    }\n'''
+          new = '''    private boolean hasGameCache() {\n        File gameDir = new File("/storage/emulated/0/GTA_CRIME_TEST");\n        return gameDir.isDirectory()\n                && new File(gameDir, "data").isDirectory()\n                && new File(gameDir, "texdb").isDirectory()\n                && new File(gameDir, "models").isDirectory()\n                && new File(gameDir, "SAMP").isDirectory()\n                && new File(gameDir, "SAMP/settings.ini").isFile()\n                && new File(gameDir, "texdb/player/player.txt").isFile()\n                && new File(gameDir, "texdb/player/player.pvr.tmb").isFile()\n                && new File(gameDir, "texdb/player/player.pvr.dat").isFile()\n                && new File(gameDir, "texdb/player/player.pvr.toc").isFile();\n    }\n\n    private void startGame() {\n        try {\n            if (!hasGameCache()) {\n                Toast.makeText(this,\n                        "Кэш CRIME неполный. Нужны GTA_CRIME_TEST и player.pvr.*",\n                        Toast.LENGTH_LONG).show();\n                return;\n            }\n            Toast.makeText(this, "Тест: CRIME player PVR bridge", Toast.LENGTH_SHORT).show();\n            startActivity(new Intent(MainActivity.this, SAMP.class));\n        } catch (Exception e) {\n            Log.e("MainActivity", "Error starting game: " + e.getMessage(), e);\n            Toast.makeText(this, "Ошибка запуска игры: " + e.getClass().getSimpleName(), Toast.LENGTH_LONG).show();\n        }\n    }\n'''
 
           if old not in s:
               raise SystemExit('startGame block not found')
@@ -98,31 +113,29 @@ jobs:
           rm -f kuzia/app/src/main/jniLibs/arm64-v8a/libbass_ssl.so
 
           cat > kuzia/VOSTOK_SOURCE_STATE.md <<'EOF'
-          # VOSTOK / Kuzia launcher source snapshot
-
-          Purpose: editable source snapshot of the isolated Kuzia + CRIME compatibility experiment.
+          # VOSTOK / Kuzia + CRIME player PVR bridge experiment
 
           Upstream: kuzia15/SAMP-Mobile
           Upstream ref: 5e531514a0bbb3d56b1a72e51fa44b18cfaf2ee2
           VOSTOK experiment branch: experiment-kuzia-goldcrime-cache
 
-          Current experiment changes:
+          Confirmed preserved fixes:
           - Linux filename-case build fixes.
-          - Java GTA base directory changed from VICE to GTA_CRIME_TEST.
-          - Every exact native/source cache root /storage/emulated/0/GTA/ under app/src/main is changed to /storage/emulated/0/GTA_CRIME_TEST/.
-          - This includes settings.cpp, main.cpp, game/hooks.cpp and any other discovered source occurrence.
-          - Launcher START validates data, texdb, models, SAMP and SAMP/settings.ini before native launch.
-          - Duplicate BASS jniLibs removed because CMake already supplies them.
-          - CI fails if a legacy /storage/emulated/0/GTA root remains.
-          - CI also inspects the rebuilt arm64 libsamp.so inside the APK and fails if it still contains the old root.
+          - Java/native cache root unified at /storage/emulated/0/GTA_CRIME_TEST/.
+          - No source-side legacy /storage/emulated/0/GTA/ root allowed.
+          - Duplicate BASS jniLibs removed because CMake supplies them.
 
-          This is an experiment only. It does not replace VOSTOK MASTER, current legacy client MASTER, or server Candidate 028.
+          Current isolated experiment:
+          - Only texdb/player DXT file-open requests are redirected to existing PVR files.
+          - mobile/txd/gta3/gta_int remain untouched and continue using the formats requested by libGame.
+          - This tests whether the runtime can consume CRIME's player PVR database through its current DXT request path.
+          - This is NOT a MASTER promotion and must pass device smoke.
           EOF
 
-      - name: Upload unified-root source for Codex
+      - name: Upload source snapshot
         uses: actions/upload-artifact@v4
         with:
-          name: VOSTOK_KUZIA_LAUNCHER_SOURCE_ROOT_UNIFIED
+          name: VOSTOK_KUZIA_CRIME_PLAYER_PVR_SOURCE
           path: kuzia
           if-no-files-found: error
           retention-days: 7
@@ -151,7 +164,7 @@ jobs:
             "ndk;26.2.11394342" \
             "cmake;3.22.1"
 
-      - name: Build unified-root APK
+      - name: Build player-PVR bridge APK
         working-directory: kuzia
         shell: bash
         run: |
@@ -160,7 +173,7 @@ jobs:
           rm -rf app/.cxx app/build/intermediates/cxx app/build/intermediates/merged_native_libs
           ./gradlew :app:assembleDebug --stacktrace --no-daemon --rerun-tasks
 
-      - name: Verify rebuilt libsamp cache root inside APK
+      - name: Verify rebuilt libsamp
         shell: bash
         run: |
           set -euxo pipefail
@@ -169,8 +182,9 @@ jobs:
           unzip -p "$APK" lib/arm64-v8a/libsamp.so > /tmp/libsamp.so
           test -s /tmp/libsamp.so
 
-          echo 'Expected CRIME root strings in rebuilt libsamp.so:'
           strings /tmp/libsamp.so | grep -F '/storage/emulated/0/GTA_CRIME_TEST/' | head -20
+          strings /tmp/libsamp.so | grep -F 'VOSTOK CRIME bridge: player.dxt.tmb -> player.pvr.tmb'
+          strings /tmp/libsamp.so | grep -F 'texdb/player/player.pvr.dat'
 
           if strings /tmp/libsamp.so | grep -F '/storage/emulated/0/GTA/'; then
             echo 'ERROR: rebuilt libsamp.so still contains legacy /storage/emulated/0/GTA/'
@@ -179,11 +193,11 @@ jobs:
 
           sha256sum /tmp/libsamp.so "$APK"
 
-      - name: Upload unified-root APK
+      - name: Upload APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: KUZIA_GOLDCRIME_ROOT_UNIFIED
+          name: KUZIA_GOLDCRIME_PLAYER_PVR_BRIDGE
           path: kuzia/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 7
@@ -192,7 +206,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: KUZIA_GOLDCRIME_ROOT_UNIFIED_LIBSAMP
+          name: KUZIA_GOLDCRIME_PLAYER_PVR_BRIDGE_LIBSAMP
           path: /tmp/libsamp.so
           if-no-files-found: error
           retention-days: 7
