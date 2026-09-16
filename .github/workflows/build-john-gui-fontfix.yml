@@ -1,0 +1,239 @@
+name: Build John GTA 2.11.311 GUI Font Fix
+
+on:
+  push:
+    branches:
+      - experiment-john-gui-fontfix
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout John source
+        uses: actions/checkout@v4
+        with:
+          repository: JohnPeriaX/samp-mobile-2.11.311
+          ref: 0df908fccfc26ac3ef54e004504b5b1f122362b1
+          path: john
+          persist-credentials: false
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+          cache-dependency-path: john/**/*.gradle*
+
+      - name: Prepare preinstalled Android SDK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0' 'ndk;26.2.11394342' 'cmake;3.22.1'
+
+      - name: Patch special-min and GUI font fallback
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          main = Path('john/app/src/main/cpp/multiplayer/samp/main.cpp')
+          text = main.read_text(encoding='utf-8')
+
+          old_endpoint = 'pNetGame = new CNetGame("gta-irz.com", 7777, "Luca_Runky", "");'
+          new_endpoint = '''if (!pSettings) {
+                    FLog("Network init aborted: settings are unavailable");
+                    return;
+                }
+                pNetGame = new CNetGame(
+                        pSettings->Get().szHost,
+                        pSettings->Get().iPort,
+                        pSettings->Get().szNickName,
+                        pSettings->Get().szPassword);'''
+          if old_endpoint not in text:
+              raise SystemExit('Expected hard-coded endpoint not found')
+          text = text.replace(old_endpoint, new_endpoint, 1)
+
+          for old, new in [
+              ('\tApplyPatches_level0();', '\tFLog("DIAG gui-fontfix: ApplyPatches_level0 disabled");'),
+              ('\tInitFPSFix(120);', '\tFLog("DIAG gui-fontfix: InitFPSFix disabled");'),
+              ('    InitRenderWareFunctions();', '    FLog("DIAG gui-fontfix: InitRenderWareFunctions disabled");'),
+          ]:
+              if old not in text:
+                  raise SystemExit(f'Expected init call not found: {old!r}')
+              text = text.replace(old, new, 1)
+
+          old_gui = '''void InitGui()
+{
+\t// new voice
+\tPlugin::OnPluginLoad();
+\tPlugin::OnSampLoad();
+
+\tstd::string font_path = BuildStoragePath(string_format("SAMP/fonts/%s", FONT_NAME).c_str());
+\tpUI = new UI(ImVec2(RsGlobal->maximumWidth, RsGlobal->maximumHeight), font_path.c_str());
+\tpUI->initialize();
+\tpUI->performLayout();
+}'''
+          new_gui = '''void InitGui()
+{
+    FLog("VOSTOK GUI DIAG: InitGui begin");
+    Plugin::OnPluginLoad();
+    FLog("VOSTOK GUI DIAG: OnPluginLoad done");
+    Plugin::OnSampLoad();
+    FLog("VOSTOK GUI DIAG: OnSampLoad done");
+
+    std::string font_path = BuildStoragePath(string_format("SAMP/fonts/%s", FONT_NAME).c_str());
+    FLog("VOSTOK GUI DIAG: requested font %s", font_path.c_str());
+    pUI = new UI(ImVec2(RsGlobal->maximumWidth, RsGlobal->maximumHeight), font_path.c_str());
+    FLog("VOSTOK GUI DIAG: UI allocated %p", pUI);
+    if (!pUI || !pUI->initialize()) {
+        FLog("VOSTOK GUI DIAG: UI initialize failed");
+        return;
+    }
+    FLog("VOSTOK GUI DIAG: UI initialize PASS");
+    pUI->performLayout();
+    FLog("VOSTOK GUI DIAG: performLayout PASS");
+}'''
+          if old_gui not in text:
+              raise SystemExit('Expected InitGui block not found')
+          text = text.replace(old_gui, new_gui, 1)
+          main.write_text(text, encoding='utf-8')
+
+          hooks = Path('john/app/src/main/cpp/multiplayer/samp/hooks/Hooks.cpp')
+          h = hooks.read_text(encoding='utf-8')
+          old = 'void InstallSpecialHooks()\n{\n    InjectHooks();\n\n    InstallUrezHooks();'
+          new = 'void InstallSpecialHooks()\n{\n    FLog("DIAG gui-fontfix: InjectHooks disabled");\n\n    FLog("DIAG gui-fontfix: InstallUrezHooks disabled");'
+          if old not in h:
+              raise SystemExit('Expected InstallSpecialHooks block not found')
+          h = h.replace(old, new, 1)
+
+          old_load = '    TextureDatabaseRuntime::Load("samp", false, TextureDatabaseFormat::DF_Default);'
+          new_load = '''    std::string sampTxt = BuildStoragePath("texdb/samp/samp.txt");
+    if (access(sampTxt.c_str(), R_OK) == 0) {
+        FLog("VOSTOK GUI DIAG: loading external samp texture DB");
+        TextureDatabaseRuntime::Load("samp", false, TextureDatabaseFormat::DF_Default);
+    } else {
+        FLog("VOSTOK GUI DIAG: samp texture DB absent, skip: %s", sampTxt.c_str());
+    }'''
+          if old_load not in h:
+              raise SystemExit('Expected samp texture load not found')
+          h = h.replace(old_load, new_load, 1)
+          if '#include <unistd.h>' not in h:
+              h = '#include <unistd.h>\n' + h
+          hooks.write_text(h, encoding='utf-8')
+
+          wrap = Path('john/app/src/main/cpp/multiplayer/samp/GUI/imguiwrapper.cpp')
+          w = wrap.read_text(encoding='utf-8')
+          old_font = '''    ImFont* font = io.Fonts->AddFontFromFileTTF(m_fontPath.c_str(),
+                                                UISettings::fontSize(), &fontCfg, ranges);
+
+    if (font == nullptr)
+    {
+        Log::addParameter("font", font);
+        return false;
+    }
+
+    createFontTexture();'''
+          new_font = '''    ImFont* font = io.Fonts->AddFontFromFileTTF(m_fontPath.c_str(),
+                                                UISettings::fontSize(), &fontCfg, ranges);
+
+    if (font == nullptr)
+    {
+        FLog("VOSTOK GUI DIAG: external font missing/unreadable: %s", m_fontPath.c_str());
+        const char* systemFont = "/system/fonts/Roboto-Bold.ttf";
+        font = io.Fonts->AddFontFromFileTTF(systemFont,
+                                            UISettings::fontSize(), &fontCfg, ranges);
+        if (font != nullptr)
+            FLog("VOSTOK GUI DIAG: system font fallback PASS: %s", systemFont);
+    }
+
+    if (font == nullptr)
+    {
+        FLog("VOSTOK GUI DIAG: system font unavailable, using ImGui default font");
+        font = io.Fonts->AddFontDefault(&fontCfg);
+    }
+
+    if (font == nullptr)
+    {
+        FLog("VOSTOK GUI DIAG: all font fallbacks failed");
+        return false;
+    }
+
+    if (!createFontTexture()) {
+        FLog("VOSTOK GUI DIAG: createFontTexture failed");
+        return false;
+    }'''
+          if old_font not in w:
+              raise SystemExit('Expected ImGui font block not found')
+          w = w.replace(old_font, new_font, 1)
+          wrap.write_text(w, encoding='utf-8')
+
+          assets = Path('john/app/src/main/assets')
+          assets.mkdir(parents=True, exist_ok=True)
+          (assets / 'settings.ini').write_text('''[client]\nname=AndroidUser\nhost=127.0.0.1\nport=7777\npassword=\nversion=0.3.7\nautoaim=false\n\n[debug]\ndebug=false\nonline=true\n\n[gui]\nFont=arial.ttf\nFontSize=30\nFontOutline=2\nandroidkeyboard=false\nVoiceChatEnable=false\nfps=0\nChatMaxMessages=6\nFPSLimit=60\nDialog=true\n''', encoding='utf-8')
+          PY
+
+          grep -n -A28 -B3 'void InitGui' john/app/src/main/cpp/multiplayer/samp/main.cpp
+          grep -n -A30 -B3 'AddFontFromFileTTF' john/app/src/main/cpp/multiplayer/samp/GUI/imguiwrapper.cpp
+          grep -n -A24 -B3 'CGame__InitialiseRenderWare_hook' john/app/src/main/cpp/multiplayer/samp/hooks/Hooks.cpp
+
+      - name: Verify source profile
+        shell: bash
+        run: |
+          set -euxo pipefail
+          grep -q "compileSdk 36" john/app/build.gradle
+          grep -q "targetSdk 36" john/app/build.gradle
+          grep -q "abiFilters 'arm64-v8a'" john/app/build.gradle
+          test "$(sha256sum john/app/src/main/jniLibs/arm64-v8a/libGame.so | awk '{print toupper($1)}')" = "4C6A7445E30B27AFDDA781302E4DB9BAC89C28FC1181B68B1EEF16F84D6A282E"
+
+      - name: Remove duplicate packaged native libs
+        shell: bash
+        run: |
+          rm -f john/app/src/main/jniLibs/arm64-v8a/libbass.so john/app/src/main/jniLibs/arm64-v8a/libbass_ssl.so john/app/src/main/jniLibs/arm64-v8a/libGlossHook.so
+
+      - name: Build APK
+        working-directory: john
+        shell: bash
+        env:
+          GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx6g -Dfile.encoding=UTF-8
+        run: |
+          set -euxo pipefail
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace clean assembleDebug
+
+      - name: Validate and stage APK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          APK="$(find john/app/build/outputs/apk/debug -type f -name '*.apk' | head -n 1)"
+          test -n "$APK"
+          test -s "$APK"
+          rm -rf /tmp/john-apk && mkdir -p /tmp/john-apk
+          unzip -q "$APK" -d /tmp/john-apk
+          test -f /tmp/john-apk/lib/arm64-v8a/libsamp.so
+          test -f /tmp/john-apk/lib/arm64-v8a/libGame.so
+          test ! -d /tmp/john-apk/lib/armeabi-v7a
+          test "$(sha256sum /tmp/john-apk/lib/arm64-v8a/libGame.so | awk '{print toupper($1)}')" = "4C6A7445E30B27AFDDA781302E4DB9BAC89C28FC1181B68B1EEF16F84D6A282E"
+          cp "$APK" JOHN_SPECIAL_MIN_GUI_FONTFIX.apk
+          sha256sum JOHN_SPECIAL_MIN_GUI_FONTFIX.apk > JOHN_SPECIAL_MIN_GUI_FONTFIX.apk.sha256
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: JOHN-SPECIAL-MIN-GUI-FONTFIX
+          path: |
+            JOHN_SPECIAL_MIN_GUI_FONTFIX.apk
+            JOHN_SPECIAL_MIN_GUI_FONTFIX.apk.sha256
+          if-no-files-found: error
+          retention-days: 14
