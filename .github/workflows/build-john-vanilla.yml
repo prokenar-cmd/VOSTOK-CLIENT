@@ -113,6 +113,20 @@ jobs:
           test -f john/app/src/main/jniLibs/arm64-v8a/libGame.so
           file john/app/src/main/jniLibs/arm64-v8a/libGame.so
 
+      - name: Remove duplicate packaged native libs
+        shell: bash
+        run: |
+          set -euxo pipefail
+          # John ships these libraries both in jniLibs and as direct CMake link inputs.
+          # Modern AGP rejects that duplicate packaging. Keep the CMake-side copies.
+          test -f john/app/src/main/cpp/multiplayer/vendor/bass/libs/arm64-v8a/libbass.so
+          test -f john/app/src/main/cpp/multiplayer/vendor/bass/libs/arm64-v8a/libbass_ssl.so
+          test -f john/app/src/main/cpp/multiplayer/vendor/patch/libs/ARM64/libGlossHook.so
+          rm -f \
+            john/app/src/main/jniLibs/arm64-v8a/libbass.so \
+            john/app/src/main/jniLibs/arm64-v8a/libbass_ssl.so \
+            john/app/src/main/jniLibs/arm64-v8a/libGlossHook.so
+
       - name: Build debug APK
         working-directory: john
         shell: bash
@@ -139,6 +153,9 @@ jobs:
 
           test -f /tmp/john-apk/lib/arm64-v8a/libsamp.so
           test -f /tmp/john-apk/lib/arm64-v8a/libGame.so
+          test -f /tmp/john-apk/lib/arm64-v8a/libbass.so
+          test -f /tmp/john-apk/lib/arm64-v8a/libbass_ssl.so
+          test -f /tmp/john-apk/lib/arm64-v8a/libGlossHook.so
           test ! -d /tmp/john-apk/lib/armeabi-v7a
 
           file /tmp/john-apk/lib/arm64-v8a/libsamp.so
