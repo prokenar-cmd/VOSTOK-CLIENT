@@ -123,19 +123,19 @@ new_font = '''    ImFont* font = nullptr;
     }
     else
     {
-        Log::addParameter("VOSTOK CLEAN: external font missing: %s", m_fontPath.c_str());
+        Log::addParameter("VOSTOK CLEAN external font missing", m_fontPath.c_str());
         const char* systemFont = "/system/fonts/Roboto-Regular.ttf";
         fontProbe = fopen(systemFont, "rb");
         if (fontProbe)
         {
             fclose(fontProbe);
-            Log::addParameter("VOSTOK CLEAN: font fallback: %s", systemFont);
+            Log::addParameter("VOSTOK CLEAN font fallback", systemFont);
             font = io.Fonts->AddFontFromFileTTF(systemFont,
                                                 UISettings::fontSize(), &fontCfg, ranges);
         }
         else
         {
-            Log::addParameter("VOSTOK CLEAN: system Roboto absent, using ImGui default font");
+            Log::addParameter("VOSTOK CLEAN font fallback", "ImGui default");
             fontCfg.SizePixels = UISettings::fontSize();
             font = io.Fonts->AddFontDefault(&fontCfg);
         }
@@ -157,7 +157,8 @@ checks = [
     ("AB KUZIA NO_UREZ_ONLY: InstallUrezHooks disabled", final_hooks),
     ("VOSTOK CLEAN: samp texture DB absent, skip", final_hooks),
     ("VOSTOK CLEAN: SAMP override missing, fallback to", final_hooks),
-    ("VOSTOK CLEAN: external font missing", final_wrapper),
+    ("VOSTOK CLEAN external font missing", final_wrapper),
+    ("VOSTOK CLEAN font fallback", final_wrapper),
     ("/system/fonts/Roboto-Regular.ttf", final_wrapper),
 ]
 for needle, haystack in checks:
@@ -167,4 +168,4 @@ if re.search(r"(?m)^\s*InstallUrezHooks\(\);\s*$", final_hooks):
     raise SystemExit("InstallUrezHooks invocation survived patch")
 
 print("Kuzia clean-cache fallbacks patched successfully")
-# workflow trigger marker: clean-fallbacks-v2
+# workflow trigger marker: clean-fallbacks-v3
