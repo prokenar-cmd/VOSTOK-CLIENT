@@ -1,0 +1,66 @@
+name: Import Kuzia GTA 2.10 Baseline
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - research-kuzia-gta210-baseline
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout exact Kuzia GTA 2.10 source
+        uses: actions/checkout@v4
+        with:
+          repository: kuzia15/SAMP-Mobile
+          ref: 980dd3edccd422c4771717a8de3df3d84ba40c21
+          path: kuzia-gta210
+          persist-credentials: false
+
+      - name: Record exact upstream state
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd kuzia-gta210
+          test "$(git rev-parse HEAD)" = "980dd3edccd422c4771717a8de3df3d84ba40c21"
+          cat > VOSTOK_UPSTREAM_STATE.txt <<'EOF'
+          Repository: https://github.com/kuzia15/SAMP-Mobile
+          Branch: GTA-2.10
+          Commit: 980dd3edccd422c4771717a8de3df3d84ba40c21
+          Captured for VOSTOK RP research baseline.
+          No source modifications applied.
+          EOF
+          test -f app/release/launcher.apk
+          sha256sum app/release/launcher.apk | tee ../KUZIA_GTA_2_10_ORIGINAL_LAUNCHER.sha256
+          stat -c '%n %s bytes' app/release/launcher.apk
+
+      - name: Prepare clean source snapshot
+        shell: bash
+        run: |
+          set -euxo pipefail
+          rm -rf kuzia-gta210/.git
+          cp kuzia-gta210/app/release/launcher.apk KUZIA_GTA_2_10_ORIGINAL_LAUNCHER.apk
+
+      - name: Upload exact source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: KUZIA_SAMP_MOBILE_GTA_2_10_SOURCE
+          path: kuzia-gta210
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Upload original launcher APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: KUZIA_GTA_2_10_ORIGINAL_LAUNCHER
+          path: |
+            KUZIA_GTA_2_10_ORIGINAL_LAUNCHER.apk
+            KUZIA_GTA_2_10_ORIGINAL_LAUNCHER.sha256
+          if-no-files-found: error
+          retention-days: 90
