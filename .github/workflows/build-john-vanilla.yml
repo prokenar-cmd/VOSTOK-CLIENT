@@ -1,9 +1,9 @@
-name: Build John GTA 2.11.311 Vanilla
+name: Build John GTA 2.11.311 NO UREZ ONLY
 
 on:
   push:
     branches:
-      - experiment-john-vanilla
+      - experiment-john-no-urez-only
   workflow_dispatch:
 
 jobs:
@@ -48,13 +48,14 @@ jobs:
             'ndk;26.2.11394342' \
             'cmake;3.22.1'
 
-      - name: Patch connection to settings.ini
+      - name: Patch baseline connection and disable ONLY InstallUrezHooks
         shell: bash
         run: |
           set -euxo pipefail
           python3 - <<'PY'
           from pathlib import Path
 
+          # Preserve the already-tested John vanilla diagnostic baseline connection.
           main = Path('john/app/src/main/cpp/multiplayer/samp/main.cpp')
           text = main.read_text(encoding='utf-8')
           old = 'pNetGame = new CNetGame("gta-irz.com", 7777, "Luca_Runky", "");'
@@ -70,6 +71,15 @@ jobs:
           if old not in text:
               raise SystemExit('Expected hard-coded John endpoint not found')
           main.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          # The A/B variable: disable exactly one call, InstallUrezHooks().
+          hooks = Path('john/app/src/main/cpp/multiplayer/samp/hooks/Hooks.cpp')
+          h = hooks.read_text(encoding='utf-8')
+          needle = '    InstallUrezHooks();'
+          if h.count(needle) != 1:
+              raise SystemExit(f'Expected exactly one InstallUrezHooks call, found {h.count(needle)}')
+          h = h.replace(needle, '    FLog("AB NO_UREZ_ONLY: InstallUrezHooks disabled");', 1)
+          hooks.write_text(h, encoding='utf-8')
 
           assets = Path('john/app/src/main/assets')
           assets.mkdir(parents=True, exist_ok=True)
@@ -98,8 +108,13 @@ jobs:
           ''', encoding='utf-8')
           PY
 
-          grep -n -A8 -B3 'pNetGame = new CNetGame' john/app/src/main/cpp/multiplayer/samp/main.cpp
-          cat john/app/src/main/assets/settings.ini
+          echo '=== A/B GUARDS ==='
+          grep -n -A10 -B5 'void InstallSpecialHooks' john/app/src/main/cpp/multiplayer/samp/hooks/Hooks.cpp
+          grep -n 'ApplyPatches_level0();' john/app/src/main/cpp/multiplayer/samp/main.cpp
+          grep -n 'InitFPSFix(120);' john/app/src/main/cpp/multiplayer/samp/main.cpp
+          grep -n 'InitRenderWareFunctions();' john/app/src/main/cpp/multiplayer/samp/main.cpp
+          grep -n 'InjectHooks();' john/app/src/main/cpp/multiplayer/samp/hooks/Hooks.cpp
+          ! grep -n '^[[:space:]]*InstallUrezHooks();' john/app/src/main/cpp/multiplayer/samp/hooks/Hooks.cpp
 
       - name: Verify John source profile
         shell: bash
@@ -111,14 +126,13 @@ jobs:
           grep -q "ndkVersion '26.2.11394342'" john/app/build.gradle
           grep -q 'max-page-size=16384' john/app/src/main/cpp/multiplayer/CMakeLists.txt
           test -f john/app/src/main/jniLibs/arm64-v8a/libGame.so
+          test "$(sha256sum john/app/src/main/jniLibs/arm64-v8a/libGame.so | awk '{print toupper($1)}')" = "4C6A7445E30B27AFDDA781302E4DB9BAC89C28FC1181B68B1EEF16F84D6A282E"
           file john/app/src/main/jniLibs/arm64-v8a/libGame.so
 
       - name: Remove duplicate packaged native libs
         shell: bash
         run: |
           set -euxo pipefail
-          # John ships these libraries both in jniLibs and as direct CMake link inputs.
-          # Modern AGP rejects that duplicate packaging. Keep the CMake-side copies.
           test -f john/app/src/main/cpp/multiplayer/vendor/bass/libs/arm64-v8a/libbass.so
           test -f john/app/src/main/cpp/multiplayer/vendor/bass/libs/arm64-v8a/libbass_ssl.so
           test -f john/app/src/main/cpp/multiplayer/vendor/patch/libs/ARM64/libGlossHook.so
@@ -167,16 +181,17 @@ jobs:
             echo 'ERROR: old hard-coded server survived native compilation'
             exit 1
           } || true
+          strings /tmp/john-apk/lib/arm64-v8a/libsamp.so | grep -F 'AB NO_UREZ_ONLY: InstallUrezHooks disabled'
 
-          cp "$APK" JOHN_VANILLA_ARM64_TEST.apk
-          sha256sum JOHN_VANILLA_ARM64_TEST.apk > JOHN_VANILLA_ARM64_TEST.sha256
+          cp "$APK" JOHN_NO_UREZ_ONLY_ARM64_TEST.apk
+          sha256sum JOHN_NO_UREZ_ONLY_ARM64_TEST.apk > JOHN_NO_UREZ_ONLY_ARM64_TEST.sha256
 
-      - name: Upload John test APK
+      - name: Upload John A-B APK
         uses: actions/upload-artifact@v4
         with:
-          name: JOHN-VANILLA-ARM64-TEST
+          name: JOHN-NO-UREZ-ONLY-ARM64-TEST
           path: |
-            JOHN_VANILLA_ARM64_TEST.apk
-            JOHN_VANILLA_ARM64_TEST.sha256
+            JOHN_NO_UREZ_ONLY_ARM64_TEST.apk
+            JOHN_NO_UREZ_ONLY_ARM64_TEST.apk.sha256
           if-no-files-found: error
           retention-days: 14
