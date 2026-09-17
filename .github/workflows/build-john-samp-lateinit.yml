@@ -1,0 +1,218 @@
+name: Build John ARM64 Late-init SAMP
+
+on:
+  push:
+    branches:
+      - experiment-john-samp-lateinit
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout John source
+        uses: actions/checkout@v4
+        with:
+          repository: JohnPeriaX/samp-mobile-2.11.311
+          ref: 0df908fccfc26ac3ef54e004504b5b1f122362b1
+          path: john
+          persist-credentials: false
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+          cache-dependency-path: john/**/*.gradle*
+
+      - name: Prepare preinstalled Android SDK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0' 'ndk;26.2.11394342' 'cmake;3.22.1'
+
+      - name: Patch late-init SAMP network POC
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          main = Path('john/app/src/main/cpp/multiplayer/samp/main.cpp')
+          text = main.read_text(encoding='utf-8')
+
+          text = text.replace('\tApplyPatches_level0();', '\tFLog("VOSTOK LATEINIT: ApplyPatches_level0 skipped before GTA ready");', 1)
+          text = text.replace('\tInitFPSFix(120);', '\tFLog("VOSTOK LATEINIT: early FPS patch skipped");', 1)
+          text = text.replace('    InitRenderWareFunctions();', '    FLog("VOSTOK LATEINIT: InitRenderWareFunctions enabled");\n    InitRenderWareFunctions();', 1)
+
+          old_net = 'pNetGame = new CNetGame("gta-irz.com", 7777, "Luca_Runky", "");'
+          new_net = 'pNetGame = new CNetGame(pSettings->Get().szHost, pSettings->Get().iPort, pSettings->Get().szNickName, pSettings->Get().szPassword);'
+          if old_net not in text:
+              raise SystemExit('hardcoded CNetGame constructor not found')
+          text = text.replace(old_net, new_net, 1)
+
+          late_init = r'''void DoInitStuff()
+{
+    if (!bGameInited)
+    {
+        FLog("VOSTOK LATEINIT: GTA ready, starting headless SAMP core");
+        pGame->Initialize();
+        pGame->ToggleThePassingOfTime(false);
+        bGameInited = true;
+        FLog("VOSTOK LATEINIT: CGame::Initialize PASS");
+    }
+
+    if (!bNetworkInited && !bDebug)
+    {
+        ReadSettingFile();
+        if (!pSettings)
+        {
+            FLog("VOSTOK LATEINIT: settings unavailable, network deferred");
+            return;
+        }
+
+        FLog("VOSTOK LATEINIT: connecting host=%s port=%d nick=%s",
+             pSettings->Get().szHost,
+             pSettings->Get().iPort,
+             pSettings->Get().szNickName);
+
+        pNetGame = new CNetGame(pSettings->Get().szHost,
+                                pSettings->Get().iPort,
+                                pSettings->Get().szNickName,
+                                pSettings->Get().szPassword);
+        bNetworkInited = true;
+        FLog("VOSTOK LATEINIT: CNetGame created");
+    }
+}
+
+CVector2D radarPos'''
+          text, count = re.subn(r'void DoInitStuff\(\)\s*\{.*?\n\}\n\nCVector2D radarPos', late_init, text, count=1, flags=re.S)
+          if count != 1:
+              raise SystemExit('DoInitStuff block replacement failed')
+
+          text = text.replace('\tProcessFPSFixFrame();\n\n\tDoInitStuff();', '\tDoInitStuff();', 1)
+          main.write_text(text, encoding='utf-8')
+
+          hooks = Path('john/app/src/main/cpp/multiplayer/samp/hooks/Hooks.cpp')
+          h = hooks.read_text(encoding='utf-8')
+
+          old_special = 'void InstallSpecialHooks()\n{\n    InjectHooks();\n\n    InstallUrezHooks();'
+          new_special = 'void InstallSpecialHooks()\n{\n    FLog("VOSTOK LATEINIT: InjectHooks skipped before GTA ready");\n\n    FLog("VOSTOK LATEINIT: InstallUrezHooks skipped before GTA ready");'
+          if old_special not in h:
+              raise SystemExit('InstallSpecialHooks prologue not found')
+          h = h.replace(old_special, new_special, 1)
+
+          old_rw = '''bool CGame__InitialiseRenderWare_hook() {
+    FLog("Loading SAMP texture database..");
+    CGame__InitialiseRenderWare();
+
+    TextureDatabaseRuntime::Load("samp", false, TextureDatabaseFormat::DF_Default);
+
+    InitGui();
+    return true;
+}'''
+          new_rw = '''bool CGame__InitialiseRenderWare_hook() {
+    FLog("VOSTOK LATEINIT: entering original CGame::InitialiseRenderWare");
+    const bool result = CGame__InitialiseRenderWare();
+    FLog("VOSTOK LATEINIT: original CGame::InitialiseRenderWare returned %d", result ? 1 : 0);
+    FLog("VOSTOK LATEINIT: GUI/voice/samp texdb deferred until after GTA boot");
+    return result;
+}'''
+          if old_rw not in h:
+              raise SystemExit('RenderWare hook block not found')
+          h = h.replace(old_rw, new_rw, 1)
+
+          h = h.replace('    pGame->StartGame();\n\n    CHook::CallFunction<void>(g_libGTASA + 0x718FCC);',
+                        '    FLog("VOSTOK LATEINIT: main menu reached, enabling SAMP runtime hooks");\n    pGame->StartGame();\n    FLog("VOSTOK LATEINIT: CGame::StartGame returned");\n\n    CHook::CallFunction<void>(g_libGTASA + 0x718FCC);', 1)
+
+          old_open = '    FILE *f  = fopen(path, "rb");\n\n    if(f)'
+          new_open = '''    FILE *f  = fopen(path, "rb");
+
+    if (!f && strstr(r1, "emulated") == NULL)
+    {
+        char fallbackPath[512]{};
+        snprintf(fallbackPath, sizeof(fallbackPath), "%s%s", g_pszStorage, r1);
+        if (strcmp(fallbackPath, path) != 0)
+        {
+            FLog("VOSTOK LATEINIT: override missing, fallback %s", fallbackPath);
+            f = fopen(fallbackPath, "rb");
+        }
+    }
+
+    if(f)'''
+          if old_open not in h:
+              raise SystemExit('NvFOpen fopen block not found')
+          h = h.replace(old_open, new_open, 1)
+          hooks.write_text(h, encoding='utf-8')
+          PY
+
+          grep -n -A28 -B3 'void DoInitStuff' john/app/src/main/cpp/multiplayer/samp/main.cpp
+          grep -n -A12 -B3 'CGame__InitialiseRenderWare_hook' john/app/src/main/cpp/multiplayer/samp/hooks/Hooks.cpp
+          grep -n -A16 -B2 'void MainMenu_OnStartSAMP' john/app/src/main/cpp/multiplayer/samp/hooks/Hooks.cpp
+          grep -n -A18 -B3 'override missing' john/app/src/main/cpp/multiplayer/samp/hooks/Hooks.cpp
+
+      - name: Verify source profile
+        shell: bash
+        run: |
+          set -euxo pipefail
+          grep -q "compileSdk 36" john/app/build.gradle
+          grep -q "targetSdk 36" john/app/build.gradle
+          grep -q "abiFilters 'arm64-v8a'" john/app/build.gradle
+          test "$(sha256sum john/app/src/main/jniLibs/arm64-v8a/libGame.so | awk '{print toupper($1)}')" = "4C6A7445E30B27AFDDA781302E4DB9BAC89C28FC1181B68B1EEF16F84D6A282E"
+          grep -q 'VOSTOK LATEINIT: main menu reached, enabling SAMP runtime hooks' john/app/src/main/cpp/multiplayer/samp/hooks/Hooks.cpp
+          grep -q 'pSettings->Get().szHost' john/app/src/main/cpp/multiplayer/samp/main.cpp
+          ! grep -q 'new CNetGame("gta-irz.com"' john/app/src/main/cpp/multiplayer/samp/main.cpp
+
+      - name: Remove duplicate packaged native libs
+        shell: bash
+        run: |
+          set -euxo pipefail
+          rm -f john/app/src/main/jniLibs/arm64-v8a/libbass.so john/app/src/main/jniLibs/arm64-v8a/libbass_ssl.so john/app/src/main/jniLibs/arm64-v8a/libGlossHook.so
+
+      - name: Build APK
+        working-directory: john
+        shell: bash
+        env:
+          GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx6g -Dfile.encoding=UTF-8
+        run: |
+          set -euxo pipefail
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace clean assembleDebug
+
+      - name: Validate and stage APK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          APK="$(find john/app/build/outputs/apk/debug -type f -name '*.apk' | head -n 1)"
+          test -n "$APK"
+          test -s "$APK"
+          rm -rf /tmp/john-apk
+          mkdir -p /tmp/john-apk
+          unzip -q "$APK" -d /tmp/john-apk
+          test -f /tmp/john-apk/lib/arm64-v8a/libsamp.so
+          test -f /tmp/john-apk/lib/arm64-v8a/libGame.so
+          test ! -d /tmp/john-apk/lib/armeabi-v7a
+          test "$(sha256sum /tmp/john-apk/lib/arm64-v8a/libGame.so | awk '{print toupper($1)}')" = "4C6A7445E30B27AFDDA781302E4DB9BAC89C28FC1181B68B1EEF16F84D6A282E"
+          cp "$APK" JOHN_SAMP_LATEINIT_ARM64.apk
+          sha256sum JOHN_SAMP_LATEINIT_ARM64.apk > JOHN_SAMP_LATEINIT_ARM64.apk.sha256
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: JOHN-SAMP-LATEINIT-ARM64
+          path: |
+            JOHN_SAMP_LATEINIT_ARM64.apk
+            JOHN_SAMP_LATEINIT_ARM64.apk.sha256
+          if-no-files-found: error
+          retention-days: 14
