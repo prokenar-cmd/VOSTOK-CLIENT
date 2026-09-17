@@ -31,9 +31,11 @@ jobs:
           # Linux filename case only; no gameplay changes.
           sed -i 's#samp_widgets/playerTabList.h#samp_widgets/playertablist.h#g' kuzia/app/src/main/cpp/samp/gui/gui.h
           sed -i 's#"RGBA.h"#"rgba.h"#g' kuzia/app/src/main/cpp/samp/game/rgba.cpp
-          # Upstream still lists a retired Splunk Maven endpoint. It prevents Gradle
-          # from resolving PRDownloader even though JitPack is already configured.
+          # Retired repository endpoint breaks dependency resolution.
           sed -i '/mint\.splunk\.com\/gradle/d' kuzia/build.gradle
+          # Upstream pins PRDownloader 1.0.1, whose JitPack build is no longer resolvable.
+          # 1.0.2 is the current compatible artifact published by the same project.
+          sed -i "s#com.github.amitshekhariitbhu:PRDownloader:1.0.1#com.github.amitshekhariitbhu:PRDownloader:1.0.2#g" kuzia/app/build.gradle
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
