@@ -1,0 +1,208 @@
+name: Build John ARM64 SAMP Netcore
+
+on:
+  push:
+    branches:
+      - experiment-john-samp-lateinit
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout John source
+        uses: actions/checkout@v4
+        with:
+          repository: JohnPeriaX/samp-mobile-2.11.311
+          ref: 0df908fccfc26ac3ef54e004504b5b1f122362b1
+          path: john
+          persist-credentials: false
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+          cache-dependency-path: john/**/*.gradle*
+
+      - name: Prepare Android SDK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0' 'ndk;26.2.11394342' 'cmake;3.22.1'
+
+      - name: Patch clean-world netcore
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          def replace_once(text, old, new, label):
+              if old not in text:
+                  raise SystemExit(f'{label} not found')
+              return text.replace(old, new, 1)
+
+          # main.cpp: keep proven safe bootstrap, initialize only headless SAMP core after render loop starts.
+          main = Path('john/app/src/main/cpp/multiplayer/samp/main.cpp')
+          m = main.read_text(encoding='utf-8')
+          m = replace_once(m, '\tApplyPatches_level0();', '\tFLog("VOSTOK NETCORE: ApplyPatches_level0 skipped during GTA boot");', 'ApplyPatches_level0')
+          m = replace_once(m, '\tInitFPSFix(120);', '\tFLog("VOSTOK NETCORE: early FPS patch skipped");', 'InitFPSFix')
+          m = replace_once(m, '    InitRenderWareFunctions();', '    FLog("VOSTOK NETCORE: InitRenderWareFunctions enabled");\n    InitRenderWareFunctions();', 'InitRenderWareFunctions')
+          m = replace_once(m,
+              'pNetGame = new CNetGame("gta-irz.com", 7777, "Luca_Runky", "");',
+              'pNetGame = new CNetGame(pSettings->Get().szHost, pSettings->Get().iPort, pSettings->Get().szNickName, pSettings->Get().szPassword);',
+              'hardcoded CNetGame')
+
+          new_do_init = '''void DoInitStuff()\n{\n\tif (!bGameInited)\n\t{\n\t\tFLog("VOSTOK NETCORE: Render2d reached, initialize SAMP game bridge");\n\t\tpGame->Initialize();\n\t\tpGame->ToggleThePassingOfTime(false);\n\t\tbGameInited = true;\n\t\tFLog("VOSTOK NETCORE: CGame::Initialize PASS");\n\t}\n\n\tif (!bNetworkInited && !bDebug)\n\t{\n\t\tReadSettingFile();\n\t\tif (!pSettings)\n\t\t{\n\t\t\tFLog("VOSTOK NETCORE: settings unavailable, network deferred");\n\t\t\treturn;\n\t\t}\n\n\t\tFLog("VOSTOK NETCORE: creating CNetGame host=%s port=%d nick=%s", pSettings->Get().szHost, pSettings->Get().iPort, pSettings->Get().szNickName);\n\t\tpNetGame = new CNetGame(pSettings->Get().szHost, pSettings->Get().iPort, pSettings->Get().szNickName, pSettings->Get().szPassword);\n\t\tbNetworkInited = true;\n\t\tFLog("VOSTOK NETCORE: CNetGame created");\n\t}\n}\n\nCVector2D radarPos'''
+          m, n = re.subn(r'void DoInitStuff\(\)\s*\{.*?\n\}\n\nCVector2D radarPos', new_do_init, m, count=1, flags=re.S)
+          if n != 1:
+              raise SystemExit('DoInitStuff replacement failed')
+          m = m.replace('\tProcessFPSFixFrame();\n\n\tDoInitStuff();', '\tDoInitStuff();', 1)
+          main.write_text(m, encoding='utf-8')
+
+          hooks = Path('john/app/src/main/cpp/multiplayer/samp/hooks/Hooks.cpp')
+          h = hooks.read_text(encoding='utf-8')
+
+          h = replace_once(h,
+              'void InstallSpecialHooks()\n{\n    InjectHooks();\n\n    InstallUrezHooks();',
+              'void InstallSpecialHooks()\n{\n    FLog("VOSTOK NETCORE: InjectHooks skipped during GTA boot");\n\n    FLog("VOSTOK NETCORE: InstallUrezHooks skipped during GTA boot");',
+              'InstallSpecialHooks prologue')
+
+          old_rw = '''bool CGame__InitialiseRenderWare_hook() {\n    FLog("Loading SAMP texture database..");\n    CGame__InitialiseRenderWare();\n\n    TextureDatabaseRuntime::Load("samp", false, TextureDatabaseFormat::DF_Default);\n\n    InitGui();\n    return true;\n}'''
+          new_rw = '''bool CGame__InitialiseRenderWare_hook() {\n    FLog("VOSTOK NETCORE: entering original CGame::InitialiseRenderWare");\n    const bool result = CGame__InitialiseRenderWare();\n    FLog("VOSTOK NETCORE: original CGame::InitialiseRenderWare returned %d", result ? 1 : 0);\n    FLog("VOSTOK NETCORE: SAMP texdb/GUI/voice deferred");\n    return result;\n}'''
+          h = replace_once(h, old_rw, new_rw, 'RenderWare hook')
+
+          # Do not replace clean GTA core data/script files with donor SAMP copies.
+          patterns = [
+              r'\n    if\(!strncmp\(r1, "data/script/mainv1\.scm", 22\)\)\n    \{.*?\n    \}',
+              r'\n    // ----------------------------\n    if\(!strncmp\(r1, "data/script/scriptv1\.img", 24\)\)\n    \{.*?\n    \}',
+              r'\n    // ----------------------------\n    if\(!strncmp\(r1, "data/peds\.ide", 13\)\)\n    \{.*?\n    \}',
+              r'\n    // ----------------------------\n    if\(!strncmp\(r1, "data/vehicles\.ide", 17\)\)\n    \{.*?\n    \}',
+              r'\n    if \(!strncmp\(r1, "data/gta\.dat", 12\)\)\n    \{.*?\n    \}',
+              r'\n    if \(!strncmp\(r1, "data/handling\.cfg", 17\)\)\n    \{.*?\n    \}',
+              r'\n    if \(!strncmp\(r1, "data/weapon\.dat", 15\)\)\n    \{.*?\n    \}',
+          ]
+          for i, pat in enumerate(patterns, 1):
+              h, count = re.subn(pat, '', h, count=1, flags=re.S)
+              if count != 1:
+                  raise SystemExit(f'NvFOpen donor redirect block {i} not removed')
+
+          # Install only the Render2d -> MainLoop hook once. Do NOT install the rest of donor gameplay hooks/patches.
+          marker = 'bool g_bPlaySAMP = false;\n\nvoid MainMenu_OnStartSAMP()'
+          helper = '''bool g_bPlaySAMP = false;\nbool g_vostokNetLoopInstalled = false;\n\nvoid InstallVostokNetLoopHook()\n{\n    if (g_vostokNetLoopInstalled) return;\n    CHook::InlineHook("_Z13Render2dStuffv", &Render2dStuff_hook, &Render2dStuff);\n    g_vostokNetLoopInstalled = true;\n    FLog("VOSTOK NETCORE: Render2d/MainLoop hook installed");\n}\n\nvoid MainMenu_OnStartSAMP()'''
+          h = replace_once(h, marker, helper, 'MainMenu helper marker')
+
+          old_start = '''void MainMenu_OnStartSAMP()\n{\n    if(g_bPlaySAMP) return;\n    //InitInMenu();\n    pGame->StartGame();\n\n    CHook::CallFunction<void>(g_libGTASA + 0x718FCC); //  Menu_NewGame();\n\n\n\n   // CHook::CallFunction<void>(g_libGTASA + 0x5509AC);\n    g_bPlaySAMP = true;\n}'''
+          new_start = '''void MainMenu_OnStartSAMP()\n{\n    if(g_bPlaySAMP) return;\n    FLog("VOSTOK NETCORE: main menu reached");\n    InstallVostokNetLoopHook();\n    g_bPlaySAMP = true;\n    FLog("VOSTOK NETCORE: starting CLEAN GTA new game, no donor SAMP data redirects");\n    CHook::CallFunction<void>(g_libGTASA + 0x718FCC); // Menu_NewGame\n}'''
+          h = replace_once(h, old_start, new_start, 'MainMenu_OnStartSAMP block')
+          hooks.write_text(h, encoding='utf-8')
+
+          # Add network-stage diagnostics.
+          net = Path('john/app/src/main/cpp/multiplayer/samp/Network/Network.cpp')
+          ntext = net.read_text(encoding='utf-8')
+          ntext = replace_once(ntext,
+              '\tFLog("CNetGame initializing..");',
+              '\tFLog("VOSTOK NETCORE: CNetGame initializing host=%s port=%d nick=%s", szHostOrIp, iPort, szPlayerName);',
+              'CNetGame init log')
+          ntext = replace_once(ntext,
+              '\t\tm_pRakClient->Connect(m_szHostOrIp, m_iPort, 0, 0, 2);',
+              '\t\tFLog("VOSTOK NETCORE: RakNet Connect -> %s:%d", m_szHostOrIp, m_iPort);\n\t\tm_pRakClient->Connect(m_szHostOrIp, m_iPort, 0, 0, 2);',
+              'RakNet Connect')
+          ntext = replace_once(ntext,
+              'void CNetGame::Packet_AuthKey(Packet *pkt)\n{',
+              'void CNetGame::Packet_AuthKey(Packet *pkt)\n{\n\tFLog("VOSTOK NETCORE: packet ID_AUTH_KEY");',
+              'Packet_AuthKey')
+          ntext = replace_once(ntext,
+              'void CNetGame::Packet_ConnectionSucceeded(Packet *pkt)\n{',
+              'void CNetGame::Packet_ConnectionSucceeded(Packet *pkt)\n{\n\tFLog("VOSTOK NETCORE: transport connection accepted");',
+              'Packet_ConnectionSucceeded')
+          ntext = replace_once(ntext,
+              '\tm_pRakClient->RPC(&RPC_ClientJoin, &bsSend, HIGH_PRIORITY, RELIABLE, 0, false, UNASSIGNED_NETWORK_ID, nullptr);',
+              '\tm_pRakClient->RPC(&RPC_ClientJoin, &bsSend, HIGH_PRIORITY, RELIABLE, 0, false, UNASSIGNED_NETWORK_ID, nullptr);\n\tFLog("VOSTOK NETCORE: RPC_ClientJoin sent");',
+              'RPC_ClientJoin send')
+          net.write_text(ntext, encoding='utf-8')
+
+          rpc = Path('john/app/src/main/cpp/multiplayer/samp/Network/RPCMgr.cpp')
+          r = rpc.read_text(encoding='utf-8')
+          r = replace_once(r,
+              'void InitGame(RPCParameters* rpcParams)\n{\n\tLog::traceLastFunc("[RPC-IN] InitGame");',
+              'void InitGame(RPCParameters* rpcParams)\n{\n\tLog::traceLastFunc("[RPC-IN] InitGame");\n\tFLog("VOSTOK NETCORE: RPC InitGame received");',
+              'RPC InitGame begin')
+          r = replace_once(r,
+              '\tpPlayerPool->GetLocalPlayer()->HandleClassSelection();',
+              '\tFLog("VOSTOK NETCORE: InitGame parsed, entering class selection");\n\tpPlayerPool->GetLocalPlayer()->HandleClassSelection();',
+              'class selection log')
+          rpc.write_text(r, encoding='utf-8')
+          PY
+
+          grep -n -A28 -B3 'VOSTOK NETCORE: main menu reached' john/app/src/main/cpp/multiplayer/samp/hooks/Hooks.cpp
+          grep -n -A28 -B3 'void DoInitStuff' john/app/src/main/cpp/multiplayer/samp/main.cpp
+          ! grep -n 'SAMP/main.scm\|SAMP/script.img\|SAMP/gta.dat\|SAMP/vehicles.ide\|SAMP/peds.ide\|SAMP/weapon.dat\|SAMP/handling.cfg' john/app/src/main/cpp/multiplayer/samp/hooks/Hooks.cpp
+
+      - name: Verify source profile
+        shell: bash
+        run: |
+          set -euxo pipefail
+          grep -q "compileSdk 36" john/app/build.gradle
+          grep -q "targetSdk 36" john/app/build.gradle
+          grep -q "abiFilters 'arm64-v8a'" john/app/build.gradle
+          test "$(sha256sum john/app/src/main/jniLibs/arm64-v8a/libGame.so | awk '{print toupper($1)}')" = "4C6A7445E30B27AFDDA781302E4DB9BAC89C28FC1181B68B1EEF16F84D6A282E"
+          grep -q 'VOSTOK NETCORE: Render2d/MainLoop hook installed' john/app/src/main/cpp/multiplayer/samp/hooks/Hooks.cpp
+          grep -q 'VOSTOK NETCORE: CNetGame created' john/app/src/main/cpp/multiplayer/samp/main.cpp
+          grep -q 'VOSTOK NETCORE: transport connection accepted' john/app/src/main/cpp/multiplayer/samp/Network/Network.cpp
+          ! grep -q 'new CNetGame("gta-irz.com"' john/app/src/main/cpp/multiplayer/samp/main.cpp
+
+      - name: Remove duplicate packaged native libs
+        shell: bash
+        run: |
+          set -euxo pipefail
+          rm -f john/app/src/main/jniLibs/arm64-v8a/libbass.so john/app/src/main/jniLibs/arm64-v8a/libbass_ssl.so john/app/src/main/jniLibs/arm64-v8a/libGlossHook.so
+
+      - name: Build APK
+        working-directory: john
+        shell: bash
+        env:
+          GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx6g -Dfile.encoding=UTF-8
+        run: |
+          set -euxo pipefail
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace clean assembleDebug
+
+      - name: Validate and stage APK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          APK="$(find john/app/build/outputs/apk/debug -type f -name '*.apk' | head -n 1)"
+          test -n "$APK"
+          test -s "$APK"
+          rm -rf /tmp/john-apk
+          mkdir -p /tmp/john-apk
+          unzip -q "$APK" -d /tmp/john-apk
+          test -f /tmp/john-apk/lib/arm64-v8a/libsamp.so
+          test -f /tmp/john-apk/lib/arm64-v8a/libGame.so
+          test ! -d /tmp/john-apk/lib/armeabi-v7a
+          test "$(sha256sum /tmp/john-apk/lib/arm64-v8a/libGame.so | awk '{print toupper($1)}')" = "4C6A7445E30B27AFDDA781302E4DB9BAC89C28FC1181B68B1EEF16F84D6A282E"
+          cp "$APK" JOHN_SAMP_NETCORE_ARM64.apk
+          sha256sum JOHN_SAMP_NETCORE_ARM64.apk > JOHN_SAMP_NETCORE_ARM64.apk.sha256
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: JOHN-SAMP-NETCORE-ARM64
+          path: |
+            JOHN_SAMP_NETCORE_ARM64.apk
+            JOHN_SAMP_NETCORE_ARM64.apk.sha256
+          if-no-files-found: error
+          retention-days: 14
