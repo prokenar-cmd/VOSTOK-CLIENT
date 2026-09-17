@@ -1,9 +1,9 @@
-name: Build Kuzia GTA 2.10 ARM64 Baseline
+name: Build Kuzia GTA 2.10 ARM64 Startup Diagnostic
 
 on:
   push:
     branches:
-      - experiment-kuzia-gta210-arm64-build
+      - experiment-kuzia-gta210-arm64-diag-startup
   workflow_dispatch:
 
 permissions:
@@ -15,6 +15,11 @@ jobs:
     timeout-minutes: 60
 
     steps:
+      - name: Checkout diagnostic files
+        uses: actions/checkout@v4
+        with:
+          path: vostok-ci
+
       - name: Checkout exact Kuzia GTA 2.10 source
         uses: actions/checkout@v4
         with:
@@ -23,22 +28,25 @@ jobs:
           path: kuzia
           persist-credentials: false
 
-      - name: Verify upstream and apply build-only compatibility fixes
+      - name: Apply build-only compatibility fixes
         shell: bash
         run: |
           set -euxo pipefail
           test "$(git -C kuzia rev-parse HEAD)" = "980dd3edccd422c4771717a8de3df3d84ba40c21"
-          # Linux filename case only; no gameplay changes.
           sed -i 's#samp_widgets/playerTabList.h#samp_widgets/playertablist.h#g' kuzia/app/src/main/cpp/samp/gui/gui.h
           sed -i 's#"RGBA.h"#"rgba.h"#g' kuzia/app/src/main/cpp/samp/game/rgba.cpp
-          # Upstream contains Windows-style RakNet directory capitalization while
-          # the real repository directory is vendor/raknet. Normalize references.
           grep -RIl 'vendor/RakNet' kuzia/app/src/main/cpp | xargs -r sed -i 's#vendor/RakNet#vendor/raknet#g'
-          # Retired repository endpoint breaks dependency resolution.
           sed -i '/mint\.splunk\.com\/gradle/d' kuzia/build.gradle
-          # Upstream pins PRDownloader 1.0.1, whose JitPack build is no longer resolvable.
-          # 1.0.2 is the current compatible artifact published by the same project.
-          sed -i "s#com.github.amitshekhariitbhu:PRDownloader:1.0.1#com.github.amitshekhariitbhu:PRDownloader:1.0.2#g" kuzia/app/build.gradle
+          sed -i 's#com.github.amitshekhariitbhu:PRDownloader:1.0.1#com.github.amitshekhariitbhu:PRDownloader:1.0.2#g' kuzia/app/build.gradle
+
+      - name: Inject startup diagnostic launcher
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p kuzia/app/src/main/java/com/samp/mobile/diag
+          cp vostok-ci/research/kuzia_diag/*.java kuzia/app/src/main/java/com/samp/mobile/diag/
+          python3 vostok-ci/research/kuzia_diag/patch_manifest.py kuzia/app/src/main/AndroidManifest.xml
+          grep -q 'com.samp.mobile.diag.DiagnosticsActivity' kuzia/app/src/main/AndroidManifest.xml
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -62,7 +70,7 @@ jobs:
             "ndk;26.2.11394342" \
             "cmake;3.22.1"
 
-      - name: Create ephemeral build signing key expected by upstream
+      - name: Create build signing key
         shell: bash
         run: |
           set -euxo pipefail
@@ -75,7 +83,7 @@ jobs:
             -keyalg RSA -keysize 2048 -validity 10000 \
             -dname "CN=VOSTOK Research,O=VOSTOK,C=RU"
 
-      - name: Build debug APK from current GTA 2.10 source
+      - name: Build diagnostic APK
         working-directory: kuzia
         shell: bash
         run: |
@@ -83,7 +91,7 @@ jobs:
           chmod +x gradlew
           ./gradlew :app:assembleDebug --stacktrace --no-daemon
 
-      - name: Verify APK contains ARM64 game and SAMP libraries
+      - name: Verify and package diagnostic APK
         shell: bash
         run: |
           set -euxo pipefail
@@ -92,16 +100,16 @@ jobs:
           unzip -l "$APK" | tee apk-files.txt
           grep -q 'lib/arm64-v8a/libGTASA.so' apk-files.txt
           grep -Eq 'lib/arm64-v8a/lib(samp|SAMP)\.so' apk-files.txt
-          cp "$APK" KUZIA_GTA_2_10_ARM64_CURRENT_SOURCE.apk
-          sha256sum KUZIA_GTA_2_10_ARM64_CURRENT_SOURCE.apk | tee KUZIA_GTA_2_10_ARM64_CURRENT_SOURCE.sha256
-          stat -c '%n %s bytes' KUZIA_GTA_2_10_ARM64_CURRENT_SOURCE.apk
+          cp "$APK" KUZIA_GTA_2_10_ARM64_STARTUP_DIAG.apk
+          sha256sum KUZIA_GTA_2_10_ARM64_STARTUP_DIAG.apk | tee KUZIA_GTA_2_10_ARM64_STARTUP_DIAG.sha256
+          stat -c '%n %s bytes' KUZIA_GTA_2_10_ARM64_STARTUP_DIAG.apk
 
-      - name: Upload ARM64-capable APK
+      - name: Upload diagnostic APK
         uses: actions/upload-artifact@v4
         with:
-          name: KUZIA_GTA_2_10_ARM64_CURRENT_SOURCE
+          name: KUZIA_GTA_2_10_ARM64_STARTUP_DIAG
           path: |
-            KUZIA_GTA_2_10_ARM64_CURRENT_SOURCE.apk
-            KUZIA_GTA_2_10_ARM64_CURRENT_SOURCE.sha256
+            KUZIA_GTA_2_10_ARM64_STARTUP_DIAG.apk
+            KUZIA_GTA_2_10_ARM64_STARTUP_DIAG.sha256
           if-no-files-found: error
           retention-days: 90
