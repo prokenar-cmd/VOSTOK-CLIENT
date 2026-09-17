@@ -1,0 +1,214 @@
+name: Build John Parad1st Staged SAMP Boot
+
+on:
+  push:
+    branches:
+      - experiment-john-paradist-boot
+    paths:
+      - '.github/workflows/build-john-paradist-stage2.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout pinned John source
+        uses: actions/checkout@v4
+        with:
+          repository: JohnPeriaX/samp-mobile-2.11.311
+          ref: 0df908fccfc26ac3ef54e004504b5b1f122362b1
+          path: john
+          persist-credentials: false
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+          cache-dependency-path: john/**/*.gradle*
+
+      - name: Prepare Android SDK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0' 'ndk;26.2.11394342' 'cmake;3.22.1'
+
+      - name: Patch Parad1st staged boot
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          def replace_once(text, old, new, label):
+              n = text.count(old)
+              if n != 1:
+                  raise SystemExit(f'{label}: expected one anchor, got {n}')
+              return text.replace(old, new, 1)
+
+          # main.cpp: keep stock GTA boot safe, start network only from the in-game loop.
+          main = Path('john/app/src/main/cpp/multiplayer/samp/main.cpp')
+          m = main.read_text(encoding='utf-8')
+          m = replace_once(m, '\tApplyPatches_level0();', '\tFLog("VOSTOK STAGE2: ApplyPatches_level0 skipped during stock GTA boot");', 'level0')
+          m = replace_once(m, '\tInitFPSFix(120);', '\tFLog("VOSTOK STAGE2: early FPS patch skipped");', 'early fps')
+          m = replace_once(m, '    InitRenderWareFunctions();', '    FLog("VOSTOK STAGE2: InitRenderWareFunctions enabled");\n    InitRenderWareFunctions();', 'rw init')
+          m = replace_once(m,
+              'pNetGame = new CNetGame("gta-irz.com", 7777, "Luca_Runky", "");',
+              'pNetGame = new CNetGame(pSettings->Get().szHost, pSettings->Get().iPort, pSettings->Get().szNickName, pSettings->Get().szPassword);',
+              'network target')
+
+          new_do_init = '''void DoInitStuff()\n{\n\tif (!bGameInited)\n\t{\n\t\tFLog("VOSTOK STAGE2: first in-game MainLoop reached");\n\t\tpGame->Initialize();\n\t\tpGame->ToggleThePassingOfTime(false);\n\t\tbGameInited = true;\n\t\tFLog("VOSTOK STAGE2: CGame::Initialize PASS");\n\t}\n\n\tif (!bNetworkInited && !bDebug)\n\t{\n\t\tReadSettingFile();\n\t\tif (!pSettings)\n\t\t{\n\t\t\tFLog("VOSTOK STAGE2: settings unavailable, network deferred");\n\t\t\treturn;\n\t\t}\n\t\tFLog("VOSTOK STAGE2: creating CNetGame host=%s port=%d nick=%s", pSettings->Get().szHost, pSettings->Get().iPort, pSettings->Get().szNickName);\n\t\tpNetGame = new CNetGame(pSettings->Get().szHost, pSettings->Get().iPort, pSettings->Get().szNickName, pSettings->Get().szPassword);\n\t\tbNetworkInited = true;\n\t\tFLog("VOSTOK STAGE2: CNetGame created");\n\t}\n}\n\nCVector2D radarPos'''
+          m, n = re.subn(r'void DoInitStuff\(\)\s*\{.*?\n\}\n\nCVector2D radarPos', new_do_init, m, count=1, flags=re.S)
+          if n != 1:
+              raise SystemExit('DoInitStuff replacement failed')
+          m = m.replace('\tProcessFPSFixFrame();\n\n\tDoInitStuff();', '\tDoInitStuff();', 1)
+          main.write_text(m, encoding='utf-8')
+
+          # Multiplayer.cpp: match Parad1st staging: menu hooks/patches before NewGameCheck,
+          # scripting only once the real in-game loop begins.
+          multi = Path('john/app/src/main/cpp/multiplayer/samp/Multiplayer/Multiplayer.cpp')
+          x = multi.read_text(encoding='utf-8')
+          x = replace_once(x,
+              '    GameAimSyncInit();\n\tInitScripting();',
+              '    GameAimSyncInit();\n\tFLog("VOSTOK STAGE2: menu-stage hooks/patches ready, InitScripting deferred");',
+              'defer InitScripting')
+          x = replace_once(x,
+              '    ApplySAMPPatchesInGame();\n\tGameResetRadarColors();',
+              '    ApplySAMPPatchesInGame();\n    FLog("VOSTOK STAGE2: ApplySAMPPatchesInGame PASS, InitScripting now");\n    InitScripting();\n    FLog("VOSTOK STAGE2: InitScripting PASS");\n\tGameResetRadarColors();',
+              'in-game InitScripting')
+          multi.write_text(x, encoding='utf-8')
+
+          hooks = Path('john/app/src/main/cpp/multiplayer/samp/hooks/Hooks.cpp')
+          h = hooks.read_text(encoding='utf-8')
+
+          h = replace_once(h,
+              'void InstallSpecialHooks()\n{\n    InjectHooks();\n\n    InstallUrezHooks();',
+              'void InstallSpecialHooks()\n{\n    FLog("VOSTOK STAGE2: InjectHooks skipped during stock GTA boot");\n\n    FLog("VOSTOK STAGE2: InstallUrezHooks skipped during stock GTA boot");',
+              'safe special hooks')
+
+          old_rw = '''bool CGame__InitialiseRenderWare_hook() {\n    FLog("Loading SAMP texture database..");\n    CGame__InitialiseRenderWare();\n\n    TextureDatabaseRuntime::Load("samp", false, TextureDatabaseFormat::DF_Default);\n\n    InitGui();\n    return true;\n}'''
+          new_rw = '''bool CGame__InitialiseRenderWare_hook() {\n    FLog("VOSTOK STAGE2: entering original CGame::InitialiseRenderWare");\n    const bool result = CGame__InitialiseRenderWare();\n    FLog("VOSTOK STAGE2: original CGame::InitialiseRenderWare returned %d", result ? 1 : 0);\n    FLog("VOSTOK STAGE2: SAMP texdb/GUI/voice deferred");\n    return result;\n}'''
+          h = replace_once(h, old_rw, new_rw, 'RenderWare hook')
+
+          # Remove John's donor redirections. Stock GTA files stay stock.
+          patterns = [
+              r'\n    if\(!strncmp\(r1, "data/script/mainv1\.scm", 22\)\)\n    \{.*?\n    \}',
+              r'\n    // ----------------------------\n    if\(!strncmp\(r1, "data/script/scriptv1\.img", 24\)\)\n    \{.*?\n    \}',
+              r'\n    // ----------------------------\n    if\(!strncmp\(r1, "data/peds\.ide", 13\)\)\n    \{.*?\n    \}',
+              r'\n    // ----------------------------\n    if\(!strncmp\(r1, "data/vehicles\.ide", 17\)\)\n    \{.*?\n    \}',
+              r'\n    if \(!strncmp\(r1, "data/gta\.dat", 12\)\)\n    \{.*?\n    \}',
+              r'\n    if \(!strncmp\(r1, "data/handling\.cfg", 17\)\)\n    \{.*?\n    \}',
+              r'\n    if \(!strncmp\(r1, "data/weapon\.dat", 15\)\)\n    \{.*?\n    \}',
+          ]
+          for i, pat in enumerate(patterns, 1):
+              h, count = re.subn(pat, '', h, count=1, flags=re.S)
+              if count != 1:
+                  raise SystemExit(f'donor redirect {i} not removed')
+
+          # Preserve original GTA NvFOpen, as Parad1st does.
+          h = replace_once(h,
+              'char lastFile[123];\n\nstFile* NvFOpen(const char *r1)',
+              'char lastFile[123];\n\nstFile* (*NvFOpen_orig)(const char *r1) = nullptr;\n\nstFile* NvFOpen(const char *r1)',
+              'NvFOpen orig ptr')
+          old_miss = '''    else\n    {\n        FLog("NVFOpen hook | Error: file not found (%s)", path);\n        free(st);\n        return nullptr;\n    }\n}'''
+          new_miss = '''    else\n    {\n        free(st);\n        FLog("VOSTOK STAGE2 FILEIO: loose miss -> original NvFOpen: %s", r1);\n        if (NvFOpen_orig) return NvFOpen_orig(r1);\n        FLog("VOSTOK STAGE2 FILEIO: ERROR original NvFOpen unavailable: %s", r1);\n        return nullptr;\n    }\n}'''
+          h = replace_once(h, old_miss, new_miss, 'NvFOpen fallback')
+          h = replace_once(h,
+              '    CHook::Redirect(g_libGTASA+0x7D624C, &NvFOpen);',
+              '    CHook::InlineHook(g_libGTASA + 0x7D624C, &NvFOpen, &NvFOpen_orig);\n    FLog("VOSTOK STAGE2 FILEIO: NvFOpen original trampoline installed");',
+              'NvFOpen hook install')
+
+          # Main menu stage: exactly the missing phase from B.
+          old_start = '''void MainMenu_OnStartSAMP()\n{\n    if(g_bPlaySAMP) return;\n    //InitInMenu();\n    pGame->StartGame();\n\n    CHook::CallFunction<void>(g_libGTASA + 0x718FCC); //  Menu_NewGame();\n\n\n\n   // CHook::CallFunction<void>(g_libGTASA + 0x5509AC);\n    g_bPlaySAMP = true;\n}'''
+          new_start = '''void MainMenu_OnStartSAMP()\n{\n    if(g_bPlaySAMP) return;\n    FLog("VOSTOK STAGE2: main menu reached");\n    FLog("VOSTOK STAGE2: running John StartGame as Parad1st InitInMenu equivalent");\n    pGame->StartGame();\n    FLog("VOSTOK STAGE2: StartGame menu-stage PASS");\n    if (!StartGameScreen__OnNewGameCheck) {\n        FLog("VOSTOK STAGE2: ERROR original OnNewGameCheck pointer is null");\n        return;\n    }\n    FLog("VOSTOK STAGE2: invoking original StartGameScreen::OnNewGameCheck");\n    StartGameScreen__OnNewGameCheck();\n    g_bPlaySAMP = true;\n    FLog("VOSTOK STAGE2: original OnNewGameCheck returned");\n}'''
+          h = replace_once(h, old_start, new_start, 'MainMenu staged boot')
+
+          # First render marker in John's own hook installed by StartGame/InstallHooks.
+          old_render = '''void Render2dStuff_hook()\n{\n    Render2dStuff();\n    MainLoop();'''
+          new_render = '''void Render2dStuff_hook()\n{\n    static bool s_vostokFirstRender = true;\n    if (s_vostokFirstRender) {\n        FLog("VOSTOK STAGE2: Render2dStuff hook reached");\n        s_vostokFirstRender = false;\n    }\n    Render2dStuff();\n    MainLoop();'''
+          h = replace_once(h, old_render, new_render, 'Render2d marker')
+          hooks.write_text(h, encoding='utf-8')
+
+          # Network markers.
+          net = Path('john/app/src/main/cpp/multiplayer/samp/Network/Network.cpp')
+          n = net.read_text(encoding='utf-8')
+          n = replace_once(n, '\tFLog("CNetGame initializing..");', '\tFLog("VOSTOK STAGE2: CNetGame initializing host=%s port=%d nick=%s", szHostOrIp, iPort, szPlayerName);', 'net init')
+          n = replace_once(n, '\t\tm_pRakClient->Connect(m_szHostOrIp, m_iPort, 0, 0, 2);', '\t\tFLog("VOSTOK STAGE2: RakNet Connect -> %s:%d", m_szHostOrIp, m_iPort);\n\t\tm_pRakClient->Connect(m_szHostOrIp, m_iPort, 0, 0, 2);', 'connect')
+          n = replace_once(n, 'void CNetGame::Packet_ConnectionSucceeded(Packet *pkt)\n{', 'void CNetGame::Packet_ConnectionSucceeded(Packet *pkt)\n{\n\tFLog("VOSTOK STAGE2: transport connection accepted");', 'accepted')
+          n = replace_once(n, '\tm_pRakClient->RPC(&RPC_ClientJoin, &bsSend, HIGH_PRIORITY, RELIABLE, 0, false, UNASSIGNED_NETWORK_ID, nullptr);', '\tm_pRakClient->RPC(&RPC_ClientJoin, &bsSend, HIGH_PRIORITY, RELIABLE, 0, false, UNASSIGNED_NETWORK_ID, nullptr);\n\tFLog("VOSTOK STAGE2: RPC_ClientJoin sent");', 'join')
+          net.write_text(n, encoding='utf-8')
+
+          rpc = Path('john/app/src/main/cpp/multiplayer/samp/Network/RPCMgr.cpp')
+          r = rpc.read_text(encoding='utf-8')
+          r = replace_once(r, 'void InitGame(RPCParameters* rpcParams)\n{\n\tLog::traceLastFunc("[RPC-IN] InitGame");', 'void InitGame(RPCParameters* rpcParams)\n{\n\tLog::traceLastFunc("[RPC-IN] InitGame");\n\tFLog("VOSTOK STAGE2: RPC InitGame received");', 'InitGame marker')
+          rpc.write_text(r, encoding='utf-8')
+          PY
+
+          grep -n -A20 -B3 'VOSTOK STAGE2: main menu reached' john/app/src/main/cpp/multiplayer/samp/hooks/Hooks.cpp
+          grep -n -A15 -B5 'VOSTOK STAGE2: Render2dStuff hook reached' john/app/src/main/cpp/multiplayer/samp/hooks/Hooks.cpp
+          grep -n -A15 -B4 'InitScripting now' john/app/src/main/cpp/multiplayer/samp/Multiplayer/Multiplayer.cpp
+
+      - name: Verify patch profile
+        shell: bash
+        run: |
+          set -euxo pipefail
+          grep -q "abiFilters 'arm64-v8a'" john/app/build.gradle
+          test "$(sha256sum john/app/src/main/jniLibs/arm64-v8a/libGame.so | awk '{print toupper($1)}')" = "4C6A7445E30B27AFDDA781302E4DB9BAC89C28FC1181B68B1EEF16F84D6A282E"
+          grep -q 'VOSTOK STAGE2: StartGame menu-stage PASS' john/app/src/main/cpp/multiplayer/samp/hooks/Hooks.cpp
+          grep -q 'VOSTOK STAGE2: InitScripting PASS' john/app/src/main/cpp/multiplayer/samp/Multiplayer/Multiplayer.cpp
+          grep -q 'NvFOpen original trampoline installed' john/app/src/main/cpp/multiplayer/samp/hooks/Hooks.cpp
+          ! grep -q 'new CNetGame("gta-irz.com"' john/app/src/main/cpp/multiplayer/samp/main.cpp
+
+      - name: Remove duplicate packaged native libs
+        shell: bash
+        run: |
+          set -euxo pipefail
+          rm -f john/app/src/main/jniLibs/arm64-v8a/libbass.so john/app/src/main/jniLibs/arm64-v8a/libbass_ssl.so john/app/src/main/jniLibs/arm64-v8a/libGlossHook.so
+
+      - name: Build APK
+        working-directory: john
+        shell: bash
+        env:
+          GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx6g -Dfile.encoding=UTF-8
+        run: |
+          set -euxo pipefail
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace clean assembleDebug
+
+      - name: Validate and stage APK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          APK="$(find john/app/build/outputs/apk/debug -type f -name '*.apk' | head -n 1)"
+          test -n "$APK"
+          test -s "$APK"
+          rm -rf /tmp/stage2-apk
+          mkdir -p /tmp/stage2-apk
+          unzip -q "$APK" -d /tmp/stage2-apk
+          test -f /tmp/stage2-apk/lib/arm64-v8a/libsamp.so
+          test -f /tmp/stage2-apk/lib/arm64-v8a/libGame.so
+          test ! -d /tmp/stage2-apk/lib/armeabi-v7a
+          test "$(sha256sum /tmp/stage2-apk/lib/arm64-v8a/libGame.so | awk '{print toupper($1)}')" = "4C6A7445E30B27AFDDA781302E4DB9BAC89C28FC1181B68B1EEF16F84D6A282E"
+          cp "$APK" JOHN_PARADIST_STAGE2_ARM64.apk
+          sha256sum JOHN_PARADIST_STAGE2_ARM64.apk > JOHN_PARADIST_STAGE2_ARM64.apk.sha256
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: JOHN-PARADIST-STAGE2-ARM64
+          path: |
+            JOHN_PARADIST_STAGE2_ARM64.apk
+            JOHN_PARADIST_STAGE2_ARM64.apk.sha256
+          if-no-files-found: error
+          retention-days: 14
