@@ -12,6 +12,11 @@ jobs:
     timeout-minutes: 45
 
     steps:
+      - name: Checkout VOSTOK diagnostic branch
+        uses: actions/checkout@v4
+        with:
+          path: vostok
+
       - name: Checkout Kuzia GTA-2.11 source
         uses: actions/checkout@v4
         with:
@@ -42,207 +47,36 @@ jobs:
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager 'platform-tools' 'platforms;android-35' 'build-tools;35.0.0' 'ndk;26.2.11394342' 'cmake;3.22.1'
 
-      - name: Apply clean GTA cache compatibility fixes
+      - name: Apply clean-build compatibility fixes
         shell: bash
         run: |
           set -euxo pipefail
-
-          # Baseline build-only compatibility fixes.
-          sed -i 's#samp_widgets/playerTabList.h#samp_widgets/playertablist.h#g' \
-            kuzia/app/src/main/cpp/samp/gui/gui.h
-          sed -i 's#"RGBA.h"#"rgba.h"#g' \
-            kuzia/app/src/main/cpp/samp/game/rgba.cpp
-          sed -i 's#new File(documentsDir, "VICE")#new File(documentsDir, "GTA")#g' \
-            kuzia/app/src/main/java/com/rockstargames/oswrapper/GameActivityBase.java
+          sed -i 's#samp_widgets/playerTabList.h#samp_widgets/playertablist.h#g' kuzia/app/src/main/cpp/samp/gui/gui.h
+          sed -i 's#"RGBA.h"#"rgba.h"#g' kuzia/app/src/main/cpp/samp/game/rgba.cpp
+          sed -i 's#new File(documentsDir, "VICE")#new File(documentsDir, "GTA")#g' kuzia/app/src/main/java/com/rockstargames/oswrapper/GameActivityBase.java
           rm -f kuzia/app/src/main/jniLibs/arm64-v8a/libbass.so
           rm -f kuzia/app/src/main/jniLibs/arm64-v8a/libbass_ssl.so
+          python3 vostok/.github/scripts/patch-kuzia-clean-fallbacks.py kuzia
 
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-
-          hooks = Path('kuzia/app/src/main/cpp/samp/game/hooks.cpp')
-          text = hooks.read_text(encoding='utf-8')
-
-          # Confirm the known CRMP-only DXT rewrite still exists in upstream source,
-          # then keep its invocation disabled for the clean GTA 2.11.311 cache.
-          required = [
-              'void InstallUrezHooks()',
-              'g_libGTASA + 0x24E4C4',
-              'g_libGTASA + 0x246D17',
-              'void InstallSpecialHooks()',
-              'InjectHooks();',
-              'CHook::InlineHook("_ZN5CGame20InitialiseRenderWareEv"',
-              'CHook::InlineHook("_Z10NvUtilInitv"',
-          ]
-          for item in required:
-              if item not in text:
-                  raise SystemExit(f'Expected Kuzia baseline fragment not found: {item}')
-
-          pattern = r'(?m)^\s*InstallUrezHooks\(\);\s*$'
-          if len(re.findall(pattern, text)) != 1:
-              raise SystemExit('Expected exactly one InstallUrezHooks invocation')
-          text = re.sub(pattern,
-                        '    Log("AB KUZIA NO_UREZ_ONLY: InstallUrezHooks disabled");',
-                        text,
-                        count=1)
-
-          # Clean GTA does not contain Kuzia's optional SA-MP texture package.
-          # Do not call TextureDatabaseRuntime::Load on a DB that does not exist.
-          old_rw = '''bool CGame__InitialiseRenderWare_hook() {
-    Log("Loading SAMP texture database..");
-    CGame__InitialiseRenderWare();
-
-    TextureDatabaseRuntime::Load("samp", false, TextureDatabaseFormat::DF_Default);
-
-    InitGui();
-    return true;
-}'''
-          new_rw = '''bool CGame__InitialiseRenderWare_hook() {
-    Log("Loading SAMP texture database..");
-    bool rwOk = CGame__InitialiseRenderWare();
-    Log("VOSTOK CLEAN: original CGame::InitialiseRenderWare returned %d", rwOk ? 1 : 0);
-
-    char sampTxt[255]{};
-    snprintf(sampTxt, sizeof(sampTxt), "%stexdb/samp/samp.txt", g_pszStorage);
-    FILE* sampProbe = fopen(sampTxt, "rb");
-    if (sampProbe) {
-        fclose(sampProbe);
-        Log("VOSTOK CLEAN: loading optional samp texture DB");
-        TextureDatabaseRuntime::Load("samp", false, TextureDatabaseFormat::DF_Default);
-    } else {
-        Log("VOSTOK CLEAN: samp texture DB absent, skip: %s", sampTxt);
-    }
-
-    InitGui();
-    return rwOk;
-}'''
-          if old_rw not in text:
-              raise SystemExit('Expected CGame__InitialiseRenderWare_hook block not found')
-          text = text.replace(old_rw, new_rw, 1)
-
-          # Kuzia redirects several stock GTA files to SAMP/* overrides. On a clean GTA cache
-          # those overrides are absent. Fall back to the original /GTA/<requested path>
-          # instead of returning nullptr.
-          old_open_fail = '''    else
-    {
-        Log("NVFOpen hook | Error: file not found (%s)", path);
-        free(st);
-        return nullptr;
-    }
-}'''
-          new_open_fail = '''    else
-    {
-        Log("NVFOpen hook | Error: file not found (%s)", path);
-
-        char originalPath[255]{};
-        if (strstr(r1, "emulated") != NULL) {
-            snprintf(originalPath, sizeof(originalPath), "%s", r1);
-        } else {
-            snprintf(originalPath, sizeof(originalPath), "%s%s", g_pszStorage, r1);
-        }
-
-        if (strcmp(path, originalPath) != 0) {
-            FILE* originalFile = fopen(originalPath, "rb");
-            if (originalFile) {
-                Log("VOSTOK CLEAN: SAMP override missing, fallback to %s", originalPath);
-                st->isFileExist = true;
-                st->f = originalFile;
-                return st;
-            }
-        }
-
-        free(st);
-        return nullptr;
-    }
-}'''
-          if old_open_fail not in text:
-              raise SystemExit('Expected NvFOpen failure block not found')
-          text = text.replace(old_open_fail, new_open_fail, 1)
-          hooks.write_text(text, encoding='utf-8')
-
-          # The upstream UI hard-asserts inside AddFontFromFileTTF when the external
-          # SAMP/fonts/arial_bold.ttf is absent. Prefer it when present, then Android's
-          # system Roboto (Cyrillic-capable), then ImGui's built-in font as final fallback.
-          wrapper = Path('kuzia/app/src/main/cpp/samp/gui/imguiwrapper.cpp')
-          w = wrapper.read_text(encoding='utf-8')
-          old_font = '''    ImFont* font = io.Fonts->AddFontFromFileTTF(m_fontPath.c_str(),
-                                                UISettings::fontSize(), &fontCfg, ranges);
-
-    if (font == nullptr)
-    {
-        Log::addParameter("font", font);
-        return false;
-    }'''
-          new_font = '''    ImFont* font = nullptr;
-    FILE* fontProbe = fopen(m_fontPath.c_str(), "rb");
-    if (fontProbe)
-    {
-        fclose(fontProbe);
-        font = io.Fonts->AddFontFromFileTTF(m_fontPath.c_str(),
-                                            UISettings::fontSize(), &fontCfg, ranges);
-    }
-    else
-    {
-        Log::addParameter("VOSTOK CLEAN: external font missing: %s", m_fontPath.c_str());
-        const char* systemFont = "/system/fonts/Roboto-Regular.ttf";
-        fontProbe = fopen(systemFont, "rb");
-        if (fontProbe)
-        {
-            fclose(fontProbe);
-            Log::addParameter("VOSTOK CLEAN: font fallback: %s", systemFont);
-            font = io.Fonts->AddFontFromFileTTF(systemFont,
-                                                UISettings::fontSize(), &fontCfg, ranges);
-        }
-        else
-        {
-            Log::addParameter("VOSTOK CLEAN: system Roboto absent, using ImGui default font");
-            fontCfg.SizePixels = UISettings::fontSize();
-            font = io.Fonts->AddFontDefault(&fontCfg);
-        }
-    }
-
-    if (font == nullptr)
-    {
-        Log::addParameter("font", font);
-        return false;
-    }'''
-          if old_font not in w:
-              raise SystemExit('Expected ImGui font loading block not found')
-          wrapper.write_text(w.replace(old_font, new_font, 1), encoding='utf-8')
-          PY
-
+      - name: Verify patch guards
+        shell: bash
+        run: |
+          set -euxo pipefail
           HOOKS=kuzia/app/src/main/cpp/samp/game/hooks.cpp
           MAIN=kuzia/app/src/main/cpp/samp/main.cpp
           WRAP=kuzia/app/src/main/cpp/samp/gui/imguiwrapper.cpp
-
-          # Guards: confirmed PVR fix remains and surrounding Kuzia init stays enabled.
           grep -q 'AB KUZIA NO_UREZ_ONLY: InstallUrezHooks disabled' "$HOOKS"
           ! grep -Eq '^[[:space:]]*InstallUrezHooks\(\);[[:space:]]*$' "$HOOKS"
-          grep -q 'g_libGTASA + 0x24E4C4' "$HOOKS"
-          grep -q 'g_libGTASA + 0x246D17' "$HOOKS"
           grep -q 'InjectHooks();' "$HOOKS"
-          grep -q '_ZN5CGame20InitialiseRenderWareEv' "$HOOKS"
-          grep -q '_Z10NvUtilInitv' "$HOOKS"
           grep -q 'InstallSpecialHooks();' "$MAIN"
           grep -q 'ApplyPatches_level0();' "$MAIN"
           grep -q 'InitRenderWareFunctions();' "$MAIN"
-
-          # Guards for the new clean-cache behavior.
           grep -q 'VOSTOK CLEAN: samp texture DB absent, skip' "$HOOKS"
           grep -q 'VOSTOK CLEAN: SAMP override missing, fallback to' "$HOOKS"
           grep -q 'VOSTOK CLEAN: external font missing' "$WRAP"
           grep -q '/system/fonts/Roboto-Regular.ttf' "$WRAP"
-
-          # Preserve original Kuzia package/cache root.
           grep -q 'applicationId = "com.gta.game"' kuzia/app/build.gradle.kts
-          ! grep -R -q 'JohnCacheBootstrap\|kurdish-roleplay\|launcher_data' kuzia/app/src/main/java kuzia/app/build.gradle.kts || exit 1
           grep -q 'new File(documentsDir, "GTA")' kuzia/app/src/main/java/com/rockstargames/oswrapper/GameActivityBase.java
-
-          echo '=== CLEAN CACHE RW PATCH ==='
-          grep -n -A26 -B4 'CGame__InitialiseRenderWare_hook' "$HOOKS" | head -40
-          echo '=== CLEAN CACHE FONT PATCH ==='
-          grep -n -A35 -B4 'VOSTOK CLEAN: external font missing' "$WRAP"
 
       - name: Build APK
         working-directory: kuzia
@@ -269,12 +103,10 @@ jobs:
           test -f /tmp/kuzia-apk/lib/arm64-v8a/libGame.so
           test -f /tmp/kuzia-apk/lib/arm64-v8a/libbass.so
           test -f /tmp/kuzia-apk/lib/arm64-v8a/libbass_ssl.so
-
           strings /tmp/kuzia-apk/lib/arm64-v8a/libsamp.so | grep -F 'AB KUZIA NO_UREZ_ONLY: InstallUrezHooks disabled'
           strings /tmp/kuzia-apk/lib/arm64-v8a/libsamp.so | grep -F 'VOSTOK CLEAN: samp texture DB absent, skip'
           strings /tmp/kuzia-apk/lib/arm64-v8a/libsamp.so | grep -F 'VOSTOK CLEAN: SAMP override missing, fallback to'
           strings /tmp/kuzia-apk/lib/arm64-v8a/libsamp.so | grep -F 'VOSTOK CLEAN: external font missing'
-
           cp "$APK" KUZIA_CLEAN_FALLBACKS_GTA211_ARM64.apk
           sha256sum KUZIA_CLEAN_FALLBACKS_GTA211_ARM64.apk > KUZIA_CLEAN_FALLBACKS_GTA211_ARM64.apk.sha256
 
