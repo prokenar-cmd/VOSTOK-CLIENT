@@ -1,9 +1,9 @@
-name: Build Kuzia Clean GTA 2.11
+name: Build Kuzia GTA 2.11 NO UREZ ONLY
 
 on:
   push:
     branches:
-      - experiment-kuzia-clean-gta211
+      - experiment-kuzia-no-urez-only
   workflow_dispatch:
 
 jobs:
@@ -42,30 +42,78 @@ jobs:
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager 'platform-tools' 'platforms;android-35' 'build-tools;35.0.0' 'ndk;26.2.11394342' 'cmake;3.22.1'
 
-      - name: Apply only clean-build compatibility fixes
+      - name: Apply clean-build fixes and disable ONLY Kuzia InstallUrezHooks call
         shell: bash
         run: |
           set -euxo pipefail
 
-          # Linux filename-case fixes only; no runtime logic change.
+          # Baseline clean-build compatibility fixes from experiment-kuzia-clean-gta211.
           sed -i 's#samp_widgets/playerTabList.h#samp_widgets/playertablist.h#g' \
             kuzia/app/src/main/cpp/samp/gui/gui.h
           sed -i 's#"RGBA.h"#"rgba.h"#g' \
             kuzia/app/src/main/cpp/samp/game/rgba.cpp
-
-          # Kuzia README/source contract for GTA 2.11 cache root: /storage/emulated/0/GTA/.
           sed -i 's#new File(documentsDir, "VICE")#new File(documentsDir, "GTA")#g' \
             kuzia/app/src/main/java/com/rockstargames/oswrapper/GameActivityBase.java
-
-          # CMake already links/packages these two BASS libraries from vendor/bass.
-          # Remove duplicate jniLibs copies only; this does not change runtime code.
           rm -f kuzia/app/src/main/jniLibs/arm64-v8a/libbass.so
           rm -f kuzia/app/src/main/jniLibs/arm64-v8a/libbass_ssl.so
 
-          # IMPORTANT: keep original Kuzia package. No John/Kurdish Firebase, no foreign cache bootstrap.
+          # A/B variable: change exactly one runtime call in Kuzia source.
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          hooks = Path('kuzia/app/src/main/cpp/samp/game/hooks.cpp')
+          text = hooks.read_text(encoding='utf-8')
+
+          # Verify Kuzia really contains the CRMP/DXT patch we are testing.
+          required = [
+              "void InstallUrezHooks()",
+              "g_libGTASA + 0x24E4C4",
+              "g_libGTASA + 0x246D17",
+              "void InstallSpecialHooks()",
+              "InjectHooks();",
+              'CHook::InlineHook("_ZN5CGame20InitialiseRenderWareEv"',
+              'CHook::InlineHook("_Z10NvUtilInitv"',
+          ]
+          for item in required:
+              if item not in text:
+                  raise SystemExit(f'Expected Kuzia baseline fragment not found: {item}')
+
+          # Only the invocation is disabled. Function body remains byte-for-byte in source,
+          # so this test isolates whether applying the DXT memory rewrite causes player.dxt.tmb.
+          pattern = r'(?m)^\s*InstallUrezHooks\(\);\s*$'
+          matches = re.findall(pattern, text)
+          if len(matches) != 1:
+              raise SystemExit(f'Expected exactly one InstallUrezHooks invocation, found {len(matches)}')
+          text = re.sub(pattern,
+                        '    Log("AB KUZIA NO_UREZ_ONLY: InstallUrezHooks disabled");',
+                        text,
+                        count=1)
+          hooks.write_text(text, encoding='utf-8')
+          PY
+
+          # Guards: all surrounding Kuzia initialization stays enabled.
+          HOOKS=kuzia/app/src/main/cpp/samp/game/hooks.cpp
+          MAIN=kuzia/app/src/main/cpp/samp/main.cpp
+          grep -q 'void InstallUrezHooks()' "$HOOKS"
+          grep -q 'g_libGTASA + 0x24E4C4' "$HOOKS"
+          grep -q 'g_libGTASA + 0x246D17' "$HOOKS"
+          grep -q 'AB KUZIA NO_UREZ_ONLY: InstallUrezHooks disabled' "$HOOKS"
+          ! grep -Eq '^[[:space:]]*InstallUrezHooks\(\);[[:space:]]*$' "$HOOKS"
+          grep -q 'InjectHooks();' "$HOOKS"
+          grep -q '_ZN5CGame20InitialiseRenderWareEv' "$HOOKS"
+          grep -q '_Z10NvUtilInitv' "$HOOKS"
+          grep -q 'InstallSpecialHooks();' "$MAIN"
+          grep -q 'ApplyPatches_level0();' "$MAIN"
+          grep -q 'InitRenderWareFunctions();' "$MAIN"
+
+          # Preserve original Kuzia package/cache contract.
           grep -q 'applicationId = "com.gta.game"' kuzia/app/build.gradle.kts
           ! grep -R -q 'JohnCacheBootstrap\|kurdish-roleplay\|launcher_data' kuzia/app/src/main/java kuzia/app/build.gradle.kts || exit 1
           grep -q 'new File(documentsDir, "GTA")' kuzia/app/src/main/java/com/rockstargames/oswrapper/GameActivityBase.java
+
+          echo '=== KUZIA NO_UREZ_ONLY PATCH ==='
+          grep -n -A12 -B10 'void InstallSpecialHooks' "$HOOKS"
 
       - name: Build APK
         working-directory: kuzia
@@ -92,15 +140,16 @@ jobs:
           test -f /tmp/kuzia-apk/lib/arm64-v8a/libGame.so
           test -f /tmp/kuzia-apk/lib/arm64-v8a/libbass.so
           test -f /tmp/kuzia-apk/lib/arm64-v8a/libbass_ssl.so
-          cp "$APK" KUZIA_CLEAN_GTA211_ARM64.apk
-          sha256sum KUZIA_CLEAN_GTA211_ARM64.apk > KUZIA_CLEAN_GTA211_ARM64.apk.sha256
+          strings /tmp/kuzia-apk/lib/arm64-v8a/libsamp.so | grep -F 'AB KUZIA NO_UREZ_ONLY: InstallUrezHooks disabled'
+          cp "$APK" KUZIA_NO_UREZ_ONLY_GTA211_ARM64.apk
+          sha256sum KUZIA_NO_UREZ_ONLY_GTA211_ARM64.apk > KUZIA_NO_UREZ_ONLY_GTA211_ARM64.apk.sha256
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: KUZIA-CLEAN-GTA211-ARM64
+          name: KUZIA-NO-UREZ-ONLY-GTA211-ARM64
           path: |
-            KUZIA_CLEAN_GTA211_ARM64.apk
-            KUZIA_CLEAN_GTA211_ARM64.apk.sha256
+            KUZIA_NO_UREZ_ONLY_GTA211_ARM64.apk
+            KUZIA_NO_UREZ_ONLY_GTA211_ARM64.apk.sha256
           if-no-files-found: error
           retention-days: 14
