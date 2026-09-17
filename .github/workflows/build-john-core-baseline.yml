@@ -48,6 +48,9 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
+          def joined(lines):
+              return "\n".join(lines)
+
           main = Path('john/app/src/main/cpp/multiplayer/samp/main.cpp')
           text = main.read_text(encoding='utf-8')
 
@@ -71,22 +74,26 @@ jobs:
               raise SystemExit('Expected InstallSpecialHooks prologue not found')
           h = h.replace(old_special, new_special, 1)
 
-          old_rw = '''bool CGame__InitialiseRenderWare_hook() {
-    FLog("Loading SAMP texture database..");
-    CGame__InitialiseRenderWare();
-
-    TextureDatabaseRuntime::Load("samp", false, TextureDatabaseFormat::DF_Default);
-
-    InitGui();
-    return true;
-}'''
-          new_rw = '''bool CGame__InitialiseRenderWare_hook() {
-    FLog("VOSTOK CORE: entering original CGame::InitialiseRenderWare");
-    const bool result = CGame__InitialiseRenderWare();
-    FLog("VOSTOK CORE: original CGame::InitialiseRenderWare returned %d", result ? 1 : 0);
-    FLog("VOSTOK CORE: SAMP texdb/GUI/voice/network intentionally deferred");
-    return result;
-}'''
+          old_rw = joined([
+              'bool CGame__InitialiseRenderWare_hook() {',
+              '    FLog("Loading SAMP texture database..");',
+              '    CGame__InitialiseRenderWare();',
+              '',
+              '    TextureDatabaseRuntime::Load("samp", false, TextureDatabaseFormat::DF_Default);',
+              '',
+              '    InitGui();',
+              '    return true;',
+              '}',
+          ])
+          new_rw = joined([
+              'bool CGame__InitialiseRenderWare_hook() {',
+              '    FLog("VOSTOK CORE: entering original CGame::InitialiseRenderWare");',
+              '    const bool result = CGame__InitialiseRenderWare();',
+              '    FLog("VOSTOK CORE: original CGame::InitialiseRenderWare returned %d", result ? 1 : 0);',
+              '    FLog("VOSTOK CORE: SAMP texdb/GUI/voice/network intentionally deferred");',
+              '    return result;',
+              '}',
+          ])
           if old_rw not in h:
               raise SystemExit('Expected CGame__InitialiseRenderWare_hook block not found')
           h = h.replace(old_rw, new_rw, 1)
