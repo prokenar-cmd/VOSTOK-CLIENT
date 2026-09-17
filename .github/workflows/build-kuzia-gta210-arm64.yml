@@ -1,0 +1,98 @@
+name: Build Kuzia GTA 2.10 ARM64 Baseline
+
+on:
+  push:
+    branches:
+      - experiment-kuzia-gta210-arm64-build
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout exact Kuzia GTA 2.10 source
+        uses: actions/checkout@v4
+        with:
+          repository: kuzia15/SAMP-Mobile
+          ref: 980dd3edccd422c4771717a8de3df3d84ba40c21
+          path: kuzia
+          persist-credentials: false
+
+      - name: Verify upstream and apply Linux-only compatibility fixes
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git -C kuzia rev-parse HEAD)" = "980dd3edccd422c4771717a8de3df3d84ba40c21"
+          sed -i 's#samp_widgets/playerTabList.h#samp_widgets/playertablist.h#g' kuzia/app/src/main/cpp/samp/gui/gui.h
+          sed -i 's#"RGBA.h"#"rgba.h"#g' kuzia/app/src/main/cpp/samp/game/rgba.cpp
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+          cache-dependency-path: kuzia/**/*.gradle*
+
+      - name: Install Android SDK components
+        shell: bash
+        run: |
+          set -euxo pipefail
+          SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then SDKMANAGER="$(command -v sdkmanager)"; fi
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" \
+            "platform-tools" \
+            "platforms;android-34" \
+            "build-tools;34.0.0" \
+            "ndk;26.2.11394342" \
+            "cmake;3.22.1"
+
+      - name: Create ephemeral build signing key expected by upstream
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/keys"
+          keytool -genkeypair -v \
+            -keystore "$GITHUB_WORKSPACE/keys/new.jks" \
+            -storepass 123123 \
+            -keypass 123123 \
+            -alias key0 \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=VOSTOK Research,O=VOSTOK,C=RU"
+
+      - name: Build debug APK from current GTA 2.10 source
+        working-directory: kuzia
+        shell: bash
+        run: |
+          set -euxo pipefail
+          chmod +x gradlew
+          ./gradlew :app:assembleDebug --stacktrace --no-daemon
+
+      - name: Verify APK contains ARM64 game and SAMP libraries
+        shell: bash
+        run: |
+          set -euxo pipefail
+          APK="$(find kuzia/app/build/outputs/apk/debug -name '*.apk' -type f | head -n1)"
+          test -n "$APK"
+          unzip -l "$APK" | tee apk-files.txt
+          grep -q 'lib/arm64-v8a/libGTASA.so' apk-files.txt
+          grep -Eq 'lib/arm64-v8a/lib(samp|SAMP)\.so' apk-files.txt
+          cp "$APK" KUZIA_GTA_2_10_ARM64_CURRENT_SOURCE.apk
+          sha256sum KUZIA_GTA_2_10_ARM64_CURRENT_SOURCE.apk | tee KUZIA_GTA_2_10_ARM64_CURRENT_SOURCE.sha256
+          stat -c '%n %s bytes' KUZIA_GTA_2_10_ARM64_CURRENT_SOURCE.apk
+
+      - name: Upload ARM64-capable APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: KUZIA_GTA_2_10_ARM64_CURRENT_SOURCE
+          path: |
+            KUZIA_GTA_2_10_ARM64_CURRENT_SOURCE.apk
+            KUZIA_GTA_2_10_ARM64_CURRENT_SOURCE.sha256
+          if-no-files-found: error
+          retention-days: 90
