@@ -73,7 +73,8 @@ jobs:
           grep -q 'InitRenderWareFunctions();' "$MAIN"
           grep -q 'VOSTOK CLEAN: samp texture DB absent, skip' "$HOOKS"
           grep -q 'VOSTOK CLEAN: SAMP override missing, fallback to' "$HOOKS"
-          grep -q 'VOSTOK CLEAN: external font missing' "$WRAP"
+          grep -q 'VOSTOK CLEAN external font missing' "$WRAP"
+          grep -q 'VOSTOK CLEAN font fallback' "$WRAP"
           grep -q '/system/fonts/Roboto-Regular.ttf' "$WRAP"
           grep -q 'applicationId = "com.gta.game"' kuzia/app/build.gradle.kts
           grep -q 'new File(documentsDir, "GTA")' kuzia/app/src/main/java/com/rockstargames/oswrapper/GameActivityBase.java
@@ -106,7 +107,8 @@ jobs:
           strings /tmp/kuzia-apk/lib/arm64-v8a/libsamp.so | grep -F 'AB KUZIA NO_UREZ_ONLY: InstallUrezHooks disabled'
           strings /tmp/kuzia-apk/lib/arm64-v8a/libsamp.so | grep -F 'VOSTOK CLEAN: samp texture DB absent, skip'
           strings /tmp/kuzia-apk/lib/arm64-v8a/libsamp.so | grep -F 'VOSTOK CLEAN: SAMP override missing, fallback to'
-          strings /tmp/kuzia-apk/lib/arm64-v8a/libsamp.so | grep -F 'VOSTOK CLEAN: external font missing'
+          strings /tmp/kuzia-apk/lib/arm64-v8a/libsamp.so | grep -F 'VOSTOK CLEAN external font missing'
+          strings /tmp/kuzia-apk/lib/arm64-v8a/libsamp.so | grep -F 'VOSTOK CLEAN font fallback'
           cp "$APK" KUZIA_CLEAN_FALLBACKS_GTA211_ARM64.apk
           sha256sum KUZIA_CLEAN_FALLBACKS_GTA211_ARM64.apk > KUZIA_CLEAN_FALLBACKS_GTA211_ARM64.apk.sha256
 
