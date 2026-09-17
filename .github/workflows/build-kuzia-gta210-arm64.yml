@@ -23,13 +23,17 @@ jobs:
           path: kuzia
           persist-credentials: false
 
-      - name: Verify upstream and apply Linux-only compatibility fixes
+      - name: Verify upstream and apply build-only compatibility fixes
         shell: bash
         run: |
           set -euxo pipefail
           test "$(git -C kuzia rev-parse HEAD)" = "980dd3edccd422c4771717a8de3df3d84ba40c21"
+          # Linux filename case only; no gameplay changes.
           sed -i 's#samp_widgets/playerTabList.h#samp_widgets/playertablist.h#g' kuzia/app/src/main/cpp/samp/gui/gui.h
           sed -i 's#"RGBA.h"#"rgba.h"#g' kuzia/app/src/main/cpp/samp/game/rgba.cpp
+          # Upstream still lists a retired Splunk Maven endpoint. It prevents Gradle
+          # from resolving PRDownloader even though JitPack is already configured.
+          sed -i '/mint\.splunk\.com\/gradle/d' kuzia/build.gradle
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
