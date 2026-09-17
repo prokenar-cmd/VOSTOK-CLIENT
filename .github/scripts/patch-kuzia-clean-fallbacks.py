@@ -167,3 +167,4 @@ if re.search(r"(?m)^\s*InstallUrezHooks\(\);\s*$", final_hooks):
     raise SystemExit("InstallUrezHooks invocation survived patch")
 
 print("Kuzia clean-cache fallbacks patched successfully")
+# workflow trigger marker: clean-fallbacks-v2
