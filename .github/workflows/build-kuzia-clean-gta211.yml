@@ -57,6 +57,11 @@ jobs:
           sed -i 's#new File(documentsDir, "VICE")#new File(documentsDir, "GTA")#g' \
             kuzia/app/src/main/java/com/rockstargames/oswrapper/GameActivityBase.java
 
+          # CMake already links/packages these two BASS libraries from vendor/bass.
+          # Remove duplicate jniLibs copies only; this does not change runtime code.
+          rm -f kuzia/app/src/main/jniLibs/arm64-v8a/libbass.so
+          rm -f kuzia/app/src/main/jniLibs/arm64-v8a/libbass_ssl.so
+
           # IMPORTANT: keep original Kuzia package. No John/Kurdish Firebase, no foreign cache bootstrap.
           grep -q 'applicationId = "com.gta.game"' kuzia/app/build.gradle.kts
           ! grep -R -q 'JohnCacheBootstrap\|kurdish-roleplay\|launcher_data' kuzia/app/src/main/java kuzia/app/build.gradle.kts || exit 1
@@ -83,6 +88,10 @@ jobs:
           mkdir -p /tmp/kuzia-apk
           unzip -q "$APK" -d /tmp/kuzia-apk
           test -d /tmp/kuzia-apk/lib/arm64-v8a
+          test -f /tmp/kuzia-apk/lib/arm64-v8a/libsamp.so
+          test -f /tmp/kuzia-apk/lib/arm64-v8a/libGame.so
+          test -f /tmp/kuzia-apk/lib/arm64-v8a/libbass.so
+          test -f /tmp/kuzia-apk/lib/arm64-v8a/libbass_ssl.so
           cp "$APK" KUZIA_CLEAN_GTA211_ARM64.apk
           sha256sum KUZIA_CLEAN_GTA211_ARM64.apk > KUZIA_CLEAN_GTA211_ARM64.apk.sha256
 
