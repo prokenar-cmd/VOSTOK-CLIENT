@@ -57,103 +57,87 @@ jobs:
                   raise SystemExit(f'{label}: expected one anchor, got {n}')
               return text.replace(old, new, 1)
 
-          # ---- main.cpp: keep the proven safe GTA boot, network only from MainLoop ----
+          def J(lines):
+              return "\n".join(lines)
+
           main = Path('john/app/src/main/cpp/multiplayer/samp/main.cpp')
           m = main.read_text(encoding='utf-8')
           m = replace_once(m, '\tApplyPatches_level0();', '\tFLog("VOSTOK STAGE3: ApplyPatches_level0 skipped during stock GTA boot");', 'level0')
           m = replace_once(m, '\tInitFPSFix(120);', '\tFLog("VOSTOK STAGE3: early FPS patch skipped");', 'early fps')
           m = replace_once(m, '    InitRenderWareFunctions();', '    FLog("VOSTOK STAGE3: InitRenderWareFunctions enabled");\n    InitRenderWareFunctions();', 'rw init')
-          m = replace_once(m,
-              'pNetGame = new CNetGame("gta-irz.com", 7777, "Luca_Runky", "");',
-              'pNetGame = new CNetGame(pSettings->Get().szHost, pSettings->Get().iPort, pSettings->Get().szNickName, pSettings->Get().szPassword);',
-              'network target')
+          m = replace_once(m, 'pNetGame = new CNetGame("gta-irz.com", 7777, "Luca_Runky", "");', 'pNetGame = new CNetGame(pSettings->Get().szHost, pSettings->Get().iPort, pSettings->Get().szNickName, pSettings->Get().szPassword);', 'network target')
 
-          new_do_init = '''void DoInitStuff()
-{
-    if (!bGameInited)
-    {
-        FLog("VOSTOK STAGE3: first in-game MainLoop reached");
-        pGame->Initialize();
-        pGame->ToggleThePassingOfTime(false);
-        bGameInited = true;
-        FLog("VOSTOK STAGE3: CGame::Initialize PASS");
-    }
-
-    if (!bNetworkInited && !bDebug)
-    {
-        ReadSettingFile();
-        if (!pSettings)
-        {
-            FLog("VOSTOK STAGE3: settings unavailable, network deferred");
-            return;
-        }
-        FLog("VOSTOK STAGE3: creating CNetGame host=%s port=%d nick=%s",
-             pSettings->Get().szHost, pSettings->Get().iPort, pSettings->Get().szNickName);
-        pNetGame = new CNetGame(pSettings->Get().szHost,
-                                pSettings->Get().iPort,
-                                pSettings->Get().szNickName,
-                                pSettings->Get().szPassword);
-        bNetworkInited = true;
-        FLog("VOSTOK STAGE3: CNetGame created");
-    }
-}
-
-CVector2D radarPos'''
+          new_do_init = J([
+              'void DoInitStuff()',
+              '{',
+              '    if (!bGameInited)',
+              '    {',
+              '        FLog("VOSTOK STAGE3: first in-game MainLoop reached");',
+              '        pGame->Initialize();',
+              '        pGame->ToggleThePassingOfTime(false);',
+              '        bGameInited = true;',
+              '        FLog("VOSTOK STAGE3: CGame::Initialize PASS");',
+              '    }',
+              '',
+              '    if (!bNetworkInited && !bDebug)',
+              '    {',
+              '        ReadSettingFile();',
+              '        if (!pSettings)',
+              '        {',
+              '            FLog("VOSTOK STAGE3: settings unavailable, network deferred");',
+              '            return;',
+              '        }',
+              '        FLog("VOSTOK STAGE3: creating CNetGame host=%s port=%d nick=%s", pSettings->Get().szHost, pSettings->Get().iPort, pSettings->Get().szNickName);',
+              '        pNetGame = new CNetGame(pSettings->Get().szHost, pSettings->Get().iPort, pSettings->Get().szNickName, pSettings->Get().szPassword);',
+              '        bNetworkInited = true;',
+              '        FLog("VOSTOK STAGE3: CNetGame created");',
+              '    }',
+              '}',
+              '',
+              'CVector2D radarPos'
+          ])
           m, n = re.subn(r'void DoInitStuff\(\)\s*\{.*?\n\}\n\nCVector2D radarPos', new_do_init, m, count=1, flags=re.S)
           if n != 1:
               raise SystemExit('DoInitStuff replacement failed')
           m = m.replace('\tProcessFPSFixFrame();\n\n\tDoInitStuff();', '\tDoInitStuff();', 1)
           main.write_text(m, encoding='utf-8')
 
-          # ---- Multiplayer.cpp: mirror Parad1st InitInMenu -> OnNewGameCheck -> InitInGame ----
           multi = Path('john/app/src/main/cpp/multiplayer/samp/Multiplayer/Multiplayer.cpp')
           x = multi.read_text(encoding='utf-8')
-
-          x, n = re.subn(
-              r'([ \t]*GameAimSyncInit\(\);)\r?\n[ \t]*InitScripting\(\);',
-              r'\1\n\tFLog("VOSTOK STAGE3: menu-stage hooks/patches ready, InitScripting deferred");',
-              x,
-              count=1)
+          x, n = re.subn(r'([ \t]*GameAimSyncInit\(\);)\r?\n[ \t]*InitScripting\(\);', r'\1\n\tFLog("VOSTOK STAGE3: menu-stage hooks/patches ready, InitScripting deferred");', x, count=1)
           if n != 1:
               raise SystemExit('defer InitScripting anchor not found')
-
-          x, n = re.subn(
-              r'([ \t]*ApplySAMPPatchesInGame\(\);)\r?\n[ \t]*GameResetRadarColors\(\);',
-              r'\1\n    FLog("VOSTOK STAGE3: ApplySAMPPatchesInGame PASS, InitScripting now");\n    InitScripting();\n    FLog("VOSTOK STAGE3: InitScripting PASS");\n\tGameResetRadarColors();',
-              x,
-              count=1)
+          x, n = re.subn(r'([ \t]*ApplySAMPPatchesInGame\(\);)\r?\n[ \t]*GameResetRadarColors\(\);', r'\1\n    FLog("VOSTOK STAGE3: ApplySAMPPatchesInGame PASS, InitScripting now");\n    InitScripting();\n    FLog("VOSTOK STAGE3: InitScripting PASS");\n\tGameResetRadarColors();', x, count=1)
           if n != 1:
               raise SystemExit('in-game InitScripting anchor not found')
           multi.write_text(x, encoding='utf-8')
 
-          # ---- Hooks.cpp ----
           hooks = Path('john/app/src/main/cpp/multiplayer/samp/hooks/Hooks.cpp')
           h = hooks.read_text(encoding='utf-8')
+          h = replace_once(h, 'void InstallSpecialHooks()\n{\n    InjectHooks();\n\n    InstallUrezHooks();', 'void InstallSpecialHooks()\n{\n    FLog("VOSTOK STAGE3: InjectHooks skipped during stock GTA boot");\n\n    FLog("VOSTOK STAGE3: InstallUrezHooks skipped during stock GTA boot");', 'safe special hooks')
 
-          h = replace_once(h,
-              'void InstallSpecialHooks()\n{\n    InjectHooks();\n\n    InstallUrezHooks();',
-              'void InstallSpecialHooks()\n{\n    FLog("VOSTOK STAGE3: InjectHooks skipped during stock GTA boot");\n\n    FLog("VOSTOK STAGE3: InstallUrezHooks skipped during stock GTA boot");',
-              'safe special hooks')
-
-          old_rw = '''bool CGame__InitialiseRenderWare_hook() {
-    FLog("Loading SAMP texture database..");
-    CGame__InitialiseRenderWare();
-
-    TextureDatabaseRuntime::Load("samp", false, TextureDatabaseFormat::DF_Default);
-
-    InitGui();
-    return true;
-}'''
-          new_rw = '''bool CGame__InitialiseRenderWare_hook() {
-    FLog("VOSTOK STAGE3: entering original CGame::InitialiseRenderWare");
-    const bool result = CGame__InitialiseRenderWare();
-    FLog("VOSTOK STAGE3: original CGame::InitialiseRenderWare returned %d", result ? 1 : 0);
-    FLog("VOSTOK STAGE3: SAMP texdb/GUI/voice deferred");
-    return result;
-}'''
+          old_rw = J([
+              'bool CGame__InitialiseRenderWare_hook() {',
+              '    FLog("Loading SAMP texture database..");',
+              '    CGame__InitialiseRenderWare();',
+              '',
+              '    TextureDatabaseRuntime::Load("samp", false, TextureDatabaseFormat::DF_Default);',
+              '',
+              '    InitGui();',
+              '    return true;',
+              '}'
+          ])
+          new_rw = J([
+              'bool CGame__InitialiseRenderWare_hook() {',
+              '    FLog("VOSTOK STAGE3: entering original CGame::InitialiseRenderWare");',
+              '    const bool result = CGame__InitialiseRenderWare();',
+              '    FLog("VOSTOK STAGE3: original CGame::InitialiseRenderWare returned %d", result ? 1 : 0);',
+              '    FLog("VOSTOK STAGE3: SAMP texdb/GUI/voice deferred");',
+              '    return result;',
+              '}'
+          ])
           h = replace_once(h, old_rw, new_rw, 'RenderWare hook')
 
-          # Stock GTA files must stay stock. No John donor SAMP redirects during boot.
           patterns = [
               r'\n    if\(!strncmp\(r1, "data/script/mainv1\.scm", 22\)\)\n    \{.*?\n    \}',
               r'\n    // ----------------------------\n    if\(!strncmp\(r1, "data/script/scriptv1\.img", 24\)\)\n    \{.*?\n    \}',
@@ -168,115 +152,89 @@ CVector2D radarPos'''
               if count != 1:
                   raise SystemExit(f'donor redirect {i} not removed')
 
-          # Parad1st behaviour: preserve GTA's original NvFOpen as fallback.
-          h = replace_once(h,
-              'char lastFile[123];\n\nstFile* NvFOpen(const char *r1)',
-              'char lastFile[123];\n\nstFile* (*NvFOpen_orig)(const char *r1) = nullptr;\n\nstFile* NvFOpen(const char *r1)',
-              'NvFOpen orig ptr')
-
-          old_miss = '''    else
-    {
-        FLog("NVFOpen hook | Error: file not found (%s)", path);
-        free(st);
-        return nullptr;
-    }
-}'''
-          new_miss = '''    else
-    {
-        free(st);
-        FLog("VOSTOK STAGE3 FILEIO: loose miss -> original NvFOpen: %s", r1);
-        if (NvFOpen_orig) return NvFOpen_orig(r1);
-        FLog("VOSTOK STAGE3 FILEIO: ERROR original NvFOpen unavailable: %s", r1);
-        return nullptr;
-    }
-}'''
+          h = replace_once(h, 'char lastFile[123];\n\nstFile* NvFOpen(const char *r1)', 'char lastFile[123];\n\nstFile* (*NvFOpen_orig)(const char *r1) = nullptr;\n\nstFile* NvFOpen(const char *r1)', 'NvFOpen orig ptr')
+          old_miss = J([
+              '    else',
+              '    {',
+              '        FLog("NVFOpen hook | Error: file not found (%s)", path);',
+              '        free(st);',
+              '        return nullptr;',
+              '    }',
+              '}'
+          ])
+          new_miss = J([
+              '    else',
+              '    {',
+              '        free(st);',
+              '        FLog("VOSTOK STAGE3 FILEIO: loose miss -> original NvFOpen: %s", r1);',
+              '        if (NvFOpen_orig) return NvFOpen_orig(r1);',
+              '        FLog("VOSTOK STAGE3 FILEIO: ERROR original NvFOpen unavailable: %s", r1);',
+              '        return nullptr;',
+              '    }',
+              '}'
+          ])
           h = replace_once(h, old_miss, new_miss, 'NvFOpen fallback')
-          h = replace_once(h,
-              '    CHook::Redirect(g_libGTASA+0x7D624C, &NvFOpen);',
-              '    CHook::InlineHook(g_libGTASA + 0x7D624C, &NvFOpen, &NvFOpen_orig);\n    FLog("VOSTOK STAGE3 FILEIO: NvFOpen original trampoline installed");',
-              'NvFOpen hook install')
+          h = replace_once(h, '    CHook::Redirect(g_libGTASA+0x7D624C, &NvFOpen);', '    CHook::InlineHook(g_libGTASA + 0x7D624C, &NvFOpen, &NvFOpen_orig);\n    FLog("VOSTOK STAGE3 FILEIO: NvFOpen original trampoline installed");', 'NvFOpen hook install')
+          h = replace_once(h, 'bool g_bPlaySAMP = false;', 'extern void (*StartGameScreen__OnNewGameCheck)();\nbool g_bPlaySAMP = false;', 'OnNewGameCheck forward declaration')
 
-          # StartGameScreen original function pointer is defined later in John; expose it here.
-          h = replace_once(h,
-              'bool g_bPlaySAMP = false;',
-              'extern void (*StartGameScreen__OnNewGameCheck)();\nbool g_bPlaySAMP = false;',
-              'OnNewGameCheck forward declaration')
-
-          # Exact Parad1st ordering:
-          # InitInMenu equivalent (John StartGame) -> original OnNewGameCheck -> g_bPlaySAMP.
-          new_start = '''void MainMenu_OnStartSAMP()
-{
-    if(g_bPlaySAMP) return;
-
-    FLog("VOSTOK STAGE3: main menu reached");
-    FLog("VOSTOK STAGE3: StartGame = Parad1st InitInMenu equivalent");
-    pGame->StartGame();
-    FLog("VOSTOK STAGE3: StartGame menu-stage PASS");
-
-    if (!StartGameScreen__OnNewGameCheck)
-    {
-        FLog("VOSTOK STAGE3: ERROR original OnNewGameCheck pointer is null");
-        return;
-    }
-
-    FLog("VOSTOK STAGE3: invoking ORIGINAL StartGameScreen::OnNewGameCheck");
-    StartGameScreen__OnNewGameCheck();
-    g_bPlaySAMP = true;
-    FLog("VOSTOK STAGE3: original OnNewGameCheck returned");
-}'''
-          h, n = re.subn(
-              r'void MainMenu_OnStartSAMP\(\)\s*\{.*?\n\}\n\nunsigned int \(\*MainMenuScreen__Update\)',
-              new_start + '\n\nunsigned int (*MainMenuScreen__Update)',
-              h,
-              count=1,
-              flags=re.S)
+          new_start = J([
+              'void MainMenu_OnStartSAMP()',
+              '{',
+              '    if(g_bPlaySAMP) return;',
+              '',
+              '    FLog("VOSTOK STAGE3: main menu reached");',
+              '    FLog("VOSTOK STAGE3: StartGame = Parad1st InitInMenu equivalent");',
+              '    pGame->StartGame();',
+              '    FLog("VOSTOK STAGE3: StartGame menu-stage PASS");',
+              '',
+              '    if (!StartGameScreen__OnNewGameCheck)',
+              '    {',
+              '        FLog("VOSTOK STAGE3: ERROR original OnNewGameCheck pointer is null");',
+              '        return;',
+              '    }',
+              '',
+              '    FLog("VOSTOK STAGE3: invoking ORIGINAL StartGameScreen::OnNewGameCheck");',
+              '    StartGameScreen__OnNewGameCheck();',
+              '    g_bPlaySAMP = true;',
+              '    FLog("VOSTOK STAGE3: original OnNewGameCheck returned");',
+              '}'
+          ])
+          h, n = re.subn(r'void MainMenu_OnStartSAMP\(\)\s*\{.*?\n\}\n\nunsigned int \(\*MainMenuScreen__Update\)', new_start + '\n\nunsigned int (*MainMenuScreen__Update)', h, count=1, flags=re.S)
           if n != 1:
               raise SystemExit('MainMenu_OnStartSAMP replacement failed')
 
-          old_render = '''void Render2dStuff_hook()
-{
-    Render2dStuff();
-    MainLoop();'''
-          new_render = '''void Render2dStuff_hook()
-{
-    static bool s_vostokFirstRender = true;
-    if (s_vostokFirstRender)
-    {
-        FLog("VOSTOK STAGE3: Render2dStuff hook reached");
-        s_vostokFirstRender = false;
-    }
-    Render2dStuff();
-    MainLoop();'''
+          old_render = J([
+              'void Render2dStuff_hook()',
+              '{',
+              '    Render2dStuff();',
+              '    MainLoop();'
+          ])
+          new_render = J([
+              'void Render2dStuff_hook()',
+              '{',
+              '    static bool s_vostokFirstRender = true;',
+              '    if (s_vostokFirstRender)',
+              '    {',
+              '        FLog("VOSTOK STAGE3: Render2dStuff hook reached");',
+              '        s_vostokFirstRender = false;',
+              '    }',
+              '    Render2dStuff();',
+              '    MainLoop();'
+          ])
           h = replace_once(h, old_render, new_render, 'Render2d marker')
           hooks.write_text(h, encoding='utf-8')
 
-          # ---- network markers ----
           net = Path('john/app/src/main/cpp/multiplayer/samp/Network/Network.cpp')
           ntext = net.read_text(encoding='utf-8')
-          ntext = replace_once(ntext,
-              '\tFLog("CNetGame initializing..");',
-              '\tFLog("VOSTOK STAGE3: CNetGame initializing host=%s port=%d nick=%s", szHostOrIp, iPort, szPlayerName);',
-              'net init')
-          ntext = replace_once(ntext,
-              '\t\tm_pRakClient->Connect(m_szHostOrIp, m_iPort, 0, 0, 2);',
-              '\t\tFLog("VOSTOK STAGE3: RakNet Connect -> %s:%d", m_szHostOrIp, m_iPort);\n\t\tm_pRakClient->Connect(m_szHostOrIp, m_iPort, 0, 0, 2);',
-              'RakNet Connect')
-          ntext = replace_once(ntext,
-              'void CNetGame::Packet_ConnectionSucceeded(Packet *pkt)\n{',
-              'void CNetGame::Packet_ConnectionSucceeded(Packet *pkt)\n{\n\tFLog("VOSTOK STAGE3: transport connection accepted");',
-              'connection accepted')
-          ntext = replace_once(ntext,
-              '\tm_pRakClient->RPC(&RPC_ClientJoin, &bsSend, HIGH_PRIORITY, RELIABLE, 0, false, UNASSIGNED_NETWORK_ID, nullptr);',
-              '\tm_pRakClient->RPC(&RPC_ClientJoin, &bsSend, HIGH_PRIORITY, RELIABLE, 0, false, UNASSIGNED_NETWORK_ID, nullptr);\n\tFLog("VOSTOK STAGE3: RPC_ClientJoin sent");',
-              'ClientJoin')
+          ntext = replace_once(ntext, '\tFLog("CNetGame initializing..");', '\tFLog("VOSTOK STAGE3: CNetGame initializing host=%s port=%d nick=%s", szHostOrIp, iPort, szPlayerName);', 'net init')
+          ntext = replace_once(ntext, '\t\tm_pRakClient->Connect(m_szHostOrIp, m_iPort, 0, 0, 2);', '\t\tFLog("VOSTOK STAGE3: RakNet Connect -> %s:%d", m_szHostOrIp, m_iPort);\n\t\tm_pRakClient->Connect(m_szHostOrIp, m_iPort, 0, 0, 2);', 'RakNet Connect')
+          ntext = replace_once(ntext, 'void CNetGame::Packet_ConnectionSucceeded(Packet *pkt)\n{', 'void CNetGame::Packet_ConnectionSucceeded(Packet *pkt)\n{\n\tFLog("VOSTOK STAGE3: transport connection accepted");', 'connection accepted')
+          ntext = replace_once(ntext, '\tm_pRakClient->RPC(&RPC_ClientJoin, &bsSend, HIGH_PRIORITY, RELIABLE, 0, false, UNASSIGNED_NETWORK_ID, nullptr);', '\tm_pRakClient->RPC(&RPC_ClientJoin, &bsSend, HIGH_PRIORITY, RELIABLE, 0, false, UNASSIGNED_NETWORK_ID, nullptr);\n\tFLog("VOSTOK STAGE3: RPC_ClientJoin sent");', 'ClientJoin')
           net.write_text(ntext, encoding='utf-8')
 
           rpc = Path('john/app/src/main/cpp/multiplayer/samp/Network/RPCMgr.cpp')
           r = rpc.read_text(encoding='utf-8')
-          r = replace_once(r,
-              'void InitGame(RPCParameters* rpcParams)\n{\n\tLog::traceLastFunc("[RPC-IN] InitGame");',
-              'void InitGame(RPCParameters* rpcParams)\n{\n\tLog::traceLastFunc("[RPC-IN] InitGame");\n\tFLog("VOSTOK STAGE3: RPC InitGame received");',
-              'RPC InitGame')
+          r = replace_once(r, 'void InitGame(RPCParameters* rpcParams)\n{\n\tLog::traceLastFunc("[RPC-IN] InitGame");', 'void InitGame(RPCParameters* rpcParams)\n{\n\tLog::traceLastFunc("[RPC-IN] InitGame");\n\tFLog("VOSTOK STAGE3: RPC InitGame received");', 'RPC InitGame')
           rpc.write_text(r, encoding='utf-8')
           PY
 
