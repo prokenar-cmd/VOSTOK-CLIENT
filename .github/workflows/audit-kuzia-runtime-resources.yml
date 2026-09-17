@@ -1,0 +1,65 @@
+name: Audit Kuzia Runtime Resources
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - experiment-kuzia-clean-fallbacks
+    paths:
+      - '.github/workflows/audit-kuzia-runtime-resources.yml'
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Kuzia source
+        uses: actions/checkout@v4
+        with:
+          repository: kuzia15/SAMP-Mobile
+          ref: 5e531514a0bbb3d56b1a72e51fa44b18cfaf2ee2
+          path: kuzia
+          persist-credentials: false
+
+      - name: Build runtime dependency audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=kuzia/app/src/main
+          CPP="$ROOT/cpp/samp"
+          OUT=KUZIA_RUNTIME_RESOURCE_AUDIT.txt
+          {
+            echo 'KUZIA SAMP-Mobile exact ref: 5e531514a0bbb3d56b1a72e51fa44b18cfaf2ee2'
+            echo
+            echo '=== ALL /storage/emulated, /GTA, SAMP/, texdb/ REFERENCES ==='
+            rg -n --no-heading -S '/storage/emulated|/GTA|SAMP/|texdb/' "$ROOT" || true
+            echo
+            echo '=== FILE OPEN / PARSE / LOAD CALLS WITH PATH CONTEXT ==='
+            rg -n --no-heading -S 'fopen\(|ifstream|ofstream|INIReader|LoadTextureFromDB|TextureDatabaseRuntime::Load|AAssetManager|open\(' "$CPP" || true
+            echo
+            echo '=== EXTERNAL RESOURCE-LIKE STRING LITERALS ==='
+            rg -n --no-heading -o -S '"[^"\n]+\.(ini|cfg|dat|ide|img|scm|ttf|otf|txt|json|png|jpg|jpeg|wav|mp3|ogg|txd|dff|col|toc|tmb)"' "$CPP" || true
+            echo
+            echo '=== NATIVE SAMP RESOURCE REDIRECT BLOCK ==='
+            rg -n -C 4 --no-heading -S 'mainv1\.scm|scriptv1\.img|peds\.ide|vehicles\.ide|gta\.dat|handling\.cfg|weapon\.dat' "$CPP/game/hooks.cpp" || true
+            echo
+            echo '=== INITIALIZATION / MAIN LOOP / NETWORK ENTRY ==='
+            rg -n -C 8 --no-heading -S 'DoInitStuff|MainLoop\(|MainMenu_OnStartSAMP|CNetGame\(|ProcessConnecting|RakClient->Connect|m_pRakClient->Connect|GAMESTATE_WAIT_CONNECT|GAMESTATE_CONNECTED' "$CPP" || true
+            echo
+            echo '=== GUI / FONT / SAMP TEXTURE DB ==='
+            rg -n -C 5 --no-heading -S 'FONT_NAME|arial|TextureDatabaseRuntime::Load\("samp"|InitGui|GetTexture|LoadTextureFromDB' "$CPP" || true
+            echo
+            echo '=== VOICE / AUDIO EXTERNAL FILE REFERENCES ==='
+            rg -n --no-heading -S 'voice|Voice|BASS|\.mp3|\.ogg|\.wav|\.cfg|\.json' "$CPP/voice" "$CPP/audiostream.cpp" "$CPP/audiostream.h" 2>/dev/null || true
+            echo
+            echo '=== JAVA/KOTLIN ASSET / CACHE REFERENCES ==='
+            rg -n --no-heading -S 'GTA|SAMP|cache|asset|filesDir|external|storage|settings' "$ROOT/java" "$ROOT/kotlin" 2>/dev/null || true
+          } > "$OUT"
+          wc -l "$OUT"
+
+      - name: Upload audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: KUZIA-RUNTIME-RESOURCE-AUDIT
+          path: KUZIA_RUNTIME_RESOURCE_AUDIT.txt
+          if-no-files-found: error
+          retention-days: 7
